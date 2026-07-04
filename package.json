@@ -1,0 +1,21 @@
+{
+  "name": "e3d-netdoctor",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Standalone CLI scaffold for local network slowdown diagnosis using e3d-pcap.",
+  "bin": {
+    "e3d-netdoctor": "./bin/e3d-netdoctor.js"
+  },
+  "scripts": {
+    "dev": "node --watch ./bin/e3d-netdoctor.js preflight",
+    "build": "node ./scripts/build.js",
+    "test": "node --test",
+    "test:server": "node --test",
+    "preflight": "node ./bin/e3d-netdoctor.js preflight",
+    "smoke": "node ./bin/e3d-netdoctor.js smoke ./fixtures/sample-syn.pcap"
+  },
+  "dependencies": {
+    "e3d-pcap": "file:../e3d-pcap"
+  }
+}
