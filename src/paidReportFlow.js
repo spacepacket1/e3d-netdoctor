@@ -5,8 +5,13 @@ import { captureLiveTraffic } from './liveCapture.js';
 import { generateAndDeliverReport } from './deliveryOrchestration.js';
 import {
   buildNetdoctorRequestId,
+  createNetdoctorPaymentsClient,
   ensurePaidNetdoctorReport,
 } from './paymentGate.js';
+import {
+  recordWalletSpend,
+  resolveCreditKeyViaWallet,
+} from './walletPaymentFlow.js';
 
 export class NetdoctorPostPaymentFailureError extends Error {
   constructor(message, details = {}) {
@@ -34,10 +39,27 @@ export async function runPaidReportRequest(options = {}) {
   ));
   const orchestrateDelivery = options.orchestrateDelivery || generateAndDeliverReport;
 
+  const usingWallet = Boolean(options.wallet);
+  const oneOff = usingWallet && !options.credits;
+  let creditKey = options.creditKey;
+
+  if (usingWallet) {
+    const resolveCreditKey = options.resolveCreditKeyViaWallet || resolveCreditKeyViaWallet;
+    const walletPaymentClient = options.walletPaymentClient || createNetdoctorPaymentsClient(options.paymentOptions);
+    const resolved = await resolveCreditKey({
+      wallet: options.wallet,
+      credits: options.credits,
+      oneOff,
+      paymentClient: walletPaymentClient,
+      onPayUrl: options.onPayUrl,
+    });
+    creditKey = resolved.creditKey;
+  }
+
   const payment = await ensurePayment({
     ...options.paymentOptions,
     paymentClient: options.paymentClient,
-    creditKey: options.creditKey,
+    creditKey,
     requestId,
     metadata: {
       source: options.pcapPath ? 'pcap' : 'live-capture',
@@ -46,6 +68,11 @@ export async function runPaidReportRequest(options = {}) {
       ...options.paymentOptions?.metadata,
     },
   });
+
+  if (usingWallet && !oneOff && Number.isFinite(payment.creditsRemaining)) {
+    const recordSpend = options.recordWalletSpend || recordWalletSpend;
+    recordSpend({ wallet: options.wallet, creditsRemaining: payment.creditsRemaining });
+  }
 
   try {
     const captureResult = options.pcapPath

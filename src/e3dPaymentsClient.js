@@ -24,6 +24,10 @@ function bearer(token) {
   return { authorization: `Bearer ${token}` };
 }
 
+function optionalBearer(token) {
+  return token ? bearer(token) : {};
+}
+
 export class E3DPaymentsClient {
   e3dBaseUrl = '';
   token = '';
@@ -38,7 +42,7 @@ export class E3DPaymentsClient {
   quoteCredits({ product = 'maps', wallet, requestedIssuedCredits, promotionCode } = {}) {
     return requestJson(`${this.e3dBaseUrl}/api/payments/credits/quote`, {
       method: 'POST',
-      headers: bearer(this.token),
+      headers: optionalBearer(this.token),
       body: JSON.stringify({
         product,
         wallet,
@@ -51,13 +55,32 @@ export class E3DPaymentsClient {
   purchaseCredits({ product = 'maps', wallet, txHash, promotionCode } = {}) {
     return requestJson(`${this.e3dBaseUrl}/api/payments/credits/purchase`, {
       method: 'POST',
-      headers: bearer(this.token),
+      headers: optionalBearer(this.token),
       body: JSON.stringify({
         product,
         wallet,
         txHash,
         promotionCode,
       }),
+    });
+  }
+
+  createPaymentSession({ product = 'maps', wallet, requestedIssuedCredits } = {}) {
+    return requestJson(`${this.e3dBaseUrl}/api/payments/credits/session`, {
+      method: 'POST',
+      headers: optionalBearer(this.token),
+      body: JSON.stringify({
+        product,
+        wallet,
+        requestedIssuedCredits,
+      }),
+    });
+  }
+
+  getSessionResult(sessionId) {
+    return requestJson(`${this.e3dBaseUrl}/api/payments/credits/session/${encodeURIComponent(sessionId)}/result`, {
+      method: 'GET',
+      headers: optionalBearer(this.token),
     });
   }
 

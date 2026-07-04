@@ -98,6 +98,80 @@ test('runPaidReportRequest does not parse, capture, or deliver after failed paym
   assert.deepEqual(events, ['pay']);
 });
 
+test('runPaidReportRequest resolves a credit key via wallet before paying, in one-off mode with no persisted record', async () => {
+  const events = [];
+
+  const result = await runPaidReportRequest({
+    to: 'tester@example.com',
+    requestId: 'netdoctor:req-wallet-oneoff',
+    wallet: '0xWallet',
+    resolveCreditKeyViaWallet: async ({ wallet, oneOff, paymentClient }) => {
+      events.push(`resolve:${wallet}:${oneOff}:${typeof paymentClient}`);
+      return { creditKey: 'e3d_netdoctor_pay_wallet', source: 'purchased', creditsRemaining: 0 };
+    },
+    ensurePayment: async ({ creditKey }) => {
+      events.push(`pay:${creditKey}`);
+      return { ok: true, requestId: 'netdoctor:req-wallet-oneoff', product: 'netdoctor', route: '/netdoctor/report', creditsSpent: 500, creditsRemaining: 0 };
+    },
+    recordWalletSpend: () => {
+      events.push('recordSpend');
+    },
+    captureLive: async () => ({ capture: {}, parsed: { rows: [], diagnostics: { packetCount: 0, conversationCount: 0, warnings: [] } } }),
+    orchestrateDelivery: async () => createDeliveryResult(),
+  });
+
+  assert.deepEqual(events, [
+    'resolve:0xWallet:true:object',
+    'pay:e3d_netdoctor_pay_wallet',
+  ]);
+  assert.equal(result.payment.creditsSpent, 500);
+});
+
+test('runPaidReportRequest treats --wallet with --credits as batch mode and records the post-spend balance', async () => {
+  const events = [];
+
+  await runPaidReportRequest({
+    to: 'tester@example.com',
+    requestId: 'netdoctor:req-wallet-batch',
+    wallet: '0xWallet',
+    credits: 2000,
+    resolveCreditKeyViaWallet: async ({ oneOff, credits }) => {
+      events.push(`resolve:${oneOff}:${credits}`);
+      return { creditKey: 'e3d_netdoctor_pay_batch', source: 'purchased', creditsRemaining: 2000 };
+    },
+    ensurePayment: async () => ({ ok: true, requestId: 'netdoctor:req-wallet-batch', product: 'netdoctor', route: '/netdoctor/report', creditsSpent: 500, creditsRemaining: 1500 }),
+    recordWalletSpend: ({ wallet, creditsRemaining }) => {
+      events.push(`recordSpend:${wallet}:${creditsRemaining}`);
+    },
+    captureLive: async () => ({ capture: {}, parsed: { rows: [], diagnostics: { packetCount: 0, conversationCount: 0, warnings: [] } } }),
+    orchestrateDelivery: async () => createDeliveryResult(),
+  });
+
+  assert.deepEqual(events, [
+    'resolve:false:2000',
+    'recordSpend:0xWallet:1500',
+  ]);
+});
+
+test('runPaidReportRequest does not record wallet spend in one-off mode', async () => {
+  let recordSpendCalled = false;
+
+  await runPaidReportRequest({
+    to: 'tester@example.com',
+    requestId: 'netdoctor:req-wallet-oneoff-2',
+    wallet: '0xWallet',
+    resolveCreditKeyViaWallet: async () => ({ creditKey: 'e3d_netdoctor_pay_wallet', source: 'purchased', creditsRemaining: 0 }),
+    ensurePayment: async () => ({ ok: true, requestId: 'netdoctor:req-wallet-oneoff-2', product: 'netdoctor', route: '/netdoctor/report', creditsSpent: 500, creditsRemaining: 0 }),
+    recordWalletSpend: () => {
+      recordSpendCalled = true;
+    },
+    captureLive: async () => ({ capture: {}, parsed: { rows: [], diagnostics: { packetCount: 0, conversationCount: 0, warnings: [] } } }),
+    orchestrateDelivery: async () => createDeliveryResult(),
+  });
+
+  assert.equal(recordSpendCalled, false);
+});
+
 test('runPaidReportRequest documents post-payment retry behavior on downstream failure', async () => {
   await assert.rejects(
     () => runPaidReportRequest({

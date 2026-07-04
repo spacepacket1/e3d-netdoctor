@@ -33,7 +33,13 @@ function usage() {
     '  report <pcap> [html] [--no-system-diagnostics]  Generate a netdoctor HTML report from a capture.',
     '  deliver <pcap> <to> [--pdf] [--no-system-diagnostics]  Generate and email a netdoctor report after analysis completes.',
     `  paid-report <to> [--pcap file | --interface iface] [--duration s] [--pdf] [--request-id id] [--no-system-diagnostics]`,
-    `                        Spend ${NETDOCTOR_REPORT_PRICE_CREDITS} e3d credits before report generation.`,
+    `                [--wallet address [--credits n]]`,
+    `                        Spend ${NETDOCTOR_REPORT_PRICE_CREDITS} e3d credits before report generation. With`,
+    '                        --wallet, pay by connecting a wallet in the browser instead of an',
+    '                        existing NETDOCTOR_PAYMENT_CREDIT_KEY: no --credits pays for exactly',
+    '                        this one report (nothing saved locally); --credits n buys a reusable',
+    '                        batch of n credits and saves the key at ~/.config/e3d-netdoctor/config.json',
+    '                        for future paid-report runs against the same wallet.',
     '',
     '  --no-system-diagnostics  Skip the supplementary ping/traceroute/netstat host checks (report/deliver/paid-report).',
     '',
@@ -59,6 +65,8 @@ function parsePaidReportArgs(args) {
     interfaceName: undefined,
     durationSeconds: undefined,
     requestId: undefined,
+    wallet: undefined,
+    credits: undefined,
   };
 
   for (let i = 0; i < flags.length; i += 1) {
@@ -95,7 +103,25 @@ function parsePaidReportArgs(args) {
       i += 1;
       continue;
     }
+    if (flag === '--wallet') {
+      parsed.wallet = takeFlagValue(flags, i, flag);
+      i += 1;
+      continue;
+    }
+    if (flag === '--credits') {
+      const value = Number(takeFlagValue(flags, i, flag));
+      if (!Number.isInteger(value) || value <= 0) {
+        throw new Error('--credits must be a positive whole number of credits');
+      }
+      parsed.credits = value;
+      i += 1;
+      continue;
+    }
     throw new Error(`Unknown paid-report option: ${flag}`);
+  }
+
+  if (parsed.credits !== undefined && !parsed.wallet) {
+    throw new Error('--credits requires --wallet');
   }
 
   return parsed;
@@ -272,6 +298,11 @@ async function runPaidReport(args, {
 
   writeLine(stdout, AUTHORIZED_USE_NOTICE);
   writeLine(stdout, 'Requesting e3d payment before capture/analysis...');
+  if (options.wallet) {
+    writeLine(stdout, options.credits
+      ? `Buying ${options.credits} e3d credits with wallet ${options.wallet}...`
+      : 'Paying for this one report with a connected wallet...');
+  }
   const result = await paidReportRequest({
     to: options.recipient,
     includePdf: options.includePdf,
@@ -279,6 +310,13 @@ async function runPaidReport(args, {
     interfaceName: options.interfaceName,
     durationSeconds: options.durationSeconds,
     requestId: options.requestId,
+    wallet: options.wallet,
+    credits: options.credits,
+    onPayUrl: (url) => {
+      writeLine(stdout, `Open this URL in your browser to pay with your wallet:`);
+      writeLine(stdout, url);
+      writeLine(stdout, 'Waiting for payment to complete...');
+    },
     reportOptions: options.noSystemDiagnostics ? { systemDiagnostics: false } : {},
   });
 

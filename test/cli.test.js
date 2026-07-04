@@ -258,3 +258,105 @@ test('paid-report requests payment before the end-to-end report flow', async () 
   assert.match(output, /"verdict": "Likely local"/);
   assert.equal(stderr.read(), '');
 });
+
+test('paid-report --wallet triggers the wallet flow, prints the pay URL, and reports success', async () => {
+  const stdout = createWritableCapture();
+  const stderr = createWritableCapture();
+  let receivedOptions = null;
+
+  const exitCode = await runCli([
+    'paid-report',
+    'tester@example.com',
+    '--pcap',
+    './fixtures/sample-syn.pcap',
+    '--wallet',
+    '0xABCDEF0000000000000000000000000000000001',
+    '--credits',
+    '2000',
+  ], {
+    stdout: stdout.stream,
+    stderr: stderr.stream,
+    checkTshark: async () => ({ installed: true, version: 'TShark 4.6.0', message: 'tshark detected' }),
+    paidReportRequest: async (options) => {
+      receivedOptions = options;
+      options.onPayUrl('https://e3d.ai/pay?session=abc123');
+      return {
+        requestId: 'netdoctor:req-wallet',
+        payment: { product: 'netdoctor', route: '/netdoctor/report', creditsSpent: 500, creditsRemaining: 1500 },
+        capture: null,
+        report: { findings: { verdict: { headline: 'Likely local' } } },
+        delivery: {
+          subject: 'e3d netdoctor report: Likely local (2026-07-04)',
+          from: 'e3d netdoctor <support@e3d.ai>',
+          includePdf: false,
+          accepted: [options.to],
+          rejected: [],
+          messageId: '<paid-wallet@example.com>',
+        },
+      };
+    },
+  });
+
+  assert.equal(exitCode, 0);
+  assert.equal(receivedOptions.wallet, '0xABCDEF0000000000000000000000000000000001');
+  assert.equal(receivedOptions.credits, 2000);
+  const output = stdout.read();
+  assert.match(output, /Buying 2000 e3d credits with wallet 0xABCDEF0000000000000000000000000000000001/);
+  assert.match(output, /https:\/\/e3d\.ai\/pay\?session=abc123/);
+  assert.match(output, /Waiting for payment to complete/);
+  assert.equal(stderr.read(), '');
+});
+
+test('paid-report --wallet without --credits announces one-off payment', async () => {
+  const stdout = createWritableCapture();
+  const stderr = createWritableCapture();
+
+  const exitCode = await runCli([
+    'paid-report',
+    'tester@example.com',
+    '--pcap',
+    './fixtures/sample-syn.pcap',
+    '--wallet',
+    '0xABCDEF0000000000000000000000000000000001',
+  ], {
+    stdout: stdout.stream,
+    stderr: stderr.stream,
+    checkTshark: async () => ({ installed: true, version: 'TShark 4.6.0', message: 'tshark detected' }),
+    paidReportRequest: async (options) => ({
+      requestId: 'netdoctor:req-oneoff',
+      payment: { product: 'netdoctor', route: '/netdoctor/report', creditsSpent: 500, creditsRemaining: 0 },
+      capture: null,
+      report: { findings: { verdict: { headline: 'Inconclusive' } } },
+      delivery: {
+        subject: 'e3d netdoctor report: Inconclusive (2026-07-04)',
+        from: 'e3d netdoctor <support@e3d.ai>',
+        includePdf: false,
+        accepted: [options.to],
+        rejected: [],
+        messageId: '<paid-oneoff@example.com>',
+      },
+    }),
+  });
+
+  assert.equal(exitCode, 0);
+  assert.match(stdout.read(), /Paying for this one report with a connected wallet/);
+});
+
+test('paid-report --credits without --wallet is rejected', async () => {
+  const stdout = createWritableCapture();
+  const stderr = createWritableCapture();
+
+  const exitCode = await runCli([
+    'paid-report',
+    'tester@example.com',
+    '--credits',
+    '2000',
+  ], {
+    stdout: stdout.stream,
+    stderr: stderr.stream,
+    checkTshark: async () => ({ installed: true, version: 'TShark 4.6.0', message: 'tshark detected' }),
+  });
+
+  assert.equal(exitCode, 1);
+  assert.match(stderr.read(), /--credits requires --wallet/);
+});
