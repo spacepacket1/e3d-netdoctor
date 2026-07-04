@@ -4,6 +4,7 @@ import { test } from 'node:test';
 import {
   buildNarrativePrompt,
   buildStructuredFindings,
+  generateNarrativeWithClaude,
   generateReport,
 } from '../src/reportGeneration.js';
 
@@ -206,6 +207,78 @@ test('generateReport skips gathering system diagnostics when disabled', async ()
   assert.equal(called, false);
   assert.equal(report.findings.systemDiagnostics, undefined);
   assert.match(report.html, /System-level diagnostics \(ping, traceroute, netstat\) were not run/);
+});
+
+test('generateNarrativeWithClaude falls back when no API key is configured', async () => {
+  // options.apiKey falls back to process.env.ANTHROPIC_API_KEY, which may be
+  // ambiently set in the shell (e.g. by the harness running this test) --
+  // clear it for the duration of this test so an empty options.apiKey really
+  // means "no key", instead of silently making a real network call.
+  const previousEnvKey = process.env.ANTHROPIC_API_KEY;
+  delete process.env.ANTHROPIC_API_KEY;
+  try {
+    const findings = buildStructuredFindings(createParsedCaptureFixture());
+    const narrative = await generateNarrativeWithClaude(findings, { apiKey: '' });
+    assert.equal(narrative.source, 'fallback');
+  } finally {
+    if (previousEnvKey !== undefined) process.env.ANTHROPIC_API_KEY = previousEnvKey;
+  }
+});
+
+test('generateNarrativeWithClaude sends no temperature parameter and parses fenced JSON responses', async () => {
+  const findings = buildStructuredFindings(createParsedCaptureFixture());
+  let capturedBody = null;
+
+  const fetchImpl = async (url, options) => {
+    capturedBody = JSON.parse(options.body);
+    return {
+      ok: true,
+      text: async () => '',
+      json: async () => ({
+        content: [{
+          type: 'text',
+          text: '```json\n{"executiveSummary":["a","b","c"],"sections":{"overview":"o"}}\n```',
+        }],
+      }),
+    };
+  };
+
+  const narrative = await generateNarrativeWithClaude(findings, { apiKey: 'test-key', fetchImpl });
+
+  assert.equal('temperature' in capturedBody, false);
+  assert.deepEqual(narrative.executiveSummary, ['a', 'b', 'c']);
+  assert.equal(narrative.sections.overview, 'o');
+});
+
+test('generateNarrativeWithClaude throws a clear error when the response was truncated by max_tokens', async () => {
+  const findings = buildStructuredFindings(createParsedCaptureFixture());
+  const fetchImpl = async () => ({
+    ok: true,
+    text: async () => '',
+    json: async () => ({
+      stop_reason: 'max_tokens',
+      content: [{ type: 'text', text: '```json\n{"executiveSummary":["a"' }],
+    }),
+  });
+
+  await assert.rejects(
+    () => generateNarrativeWithClaude(findings, { apiKey: 'test-key', fetchImpl }),
+    /truncated \(hit max_tokens/,
+  );
+});
+
+test('generateNarrativeWithClaude throws a clear error on a non-JSON response, letting generateReport fall back', async () => {
+  const findings = buildStructuredFindings(createParsedCaptureFixture());
+  const fetchImpl = async () => ({
+    ok: true,
+    text: async () => '',
+    json: async () => ({ content: [{ type: 'text', text: 'not json at all' }] }),
+  });
+
+  await assert.rejects(
+    () => generateNarrativeWithClaude(findings, { apiKey: 'test-key', fetchImpl }),
+    /Claude narrative generation returned invalid JSON/,
+  );
 });
 
 test('buildNarrativePrompt scopes the model input to structured findings', () => {

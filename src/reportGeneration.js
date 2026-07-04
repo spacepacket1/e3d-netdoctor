@@ -1,6 +1,6 @@
 import { gatherSystemDiagnostics } from './systemDiagnostics.js';
 
-const DEFAULT_ANTHROPIC_MODEL = process.env.NETDOCTOR_ANTHROPIC_MODEL || 'claude-3-5-sonnet-latest';
+const DEFAULT_ANTHROPIC_MODEL = process.env.NETDOCTOR_ANTHROPIC_MODEL || 'claude-sonnet-5';
 const DEFAULT_EXECUTIVE_SUMMARY_LIMIT = 5;
 
 function toNumber(value) {
@@ -513,6 +513,26 @@ function extractAnthropicText(responseJson) {
   return textBlock?.text || null;
 }
 
+function stripJsonCodeFence(text) {
+  const trimmed = String(text ?? '').trim();
+
+  // Look for a fenced block anywhere in the text, not just one spanning the
+  // whole string -- models sometimes add a preamble/postamble around it
+  // despite being asked for JSON only.
+  const fenced = trimmed.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
+  if (fenced) return fenced[1].trim();
+
+  // No fence at all: fall back to the outermost {...} span, in case there's
+  // stray prose around raw (unfenced) JSON.
+  const firstBrace = trimmed.indexOf('{');
+  const lastBrace = trimmed.lastIndexOf('}');
+  if (firstBrace !== -1 && lastBrace > firstBrace) {
+    return trimmed.slice(firstBrace, lastBrace + 1);
+  }
+
+  return trimmed;
+}
+
 function validateNarrative(candidate, findings) {
   const executiveSummary = sanitizeBulletList(candidate?.executiveSummary);
   const sections = candidate?.sections && typeof candidate.sections === 'object'
@@ -560,8 +580,7 @@ export async function generateNarrativeWithClaude(findings, options = {}) {
     },
     body: JSON.stringify({
       model,
-      max_tokens: 900,
-      temperature: 0.2,
+      max_tokens: 4096,
       messages: [
         {
           role: 'user',
@@ -579,10 +598,13 @@ export async function generateNarrativeWithClaude(findings, options = {}) {
   const responseJson = await response.json();
   const text = extractAnthropicText(responseJson);
   if (!text) throw new Error('Claude narrative generation returned no text content');
+  if (responseJson?.stop_reason === 'max_tokens') {
+    throw new Error('Claude narrative generation was truncated (hit max_tokens before finishing); raise max_tokens or shorten the findings payload');
+  }
 
   let parsedJson;
   try {
-    parsedJson = JSON.parse(text);
+    parsedJson = JSON.parse(stripJsonCodeFence(text));
   } catch (error) {
     throw new Error(`Claude narrative generation returned invalid JSON: ${error.message}`);
   }
