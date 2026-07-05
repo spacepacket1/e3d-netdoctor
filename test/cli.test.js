@@ -235,6 +235,39 @@ test('report --speed-test passes speedTest: true through to buildReport, off by 
   assert.equal(capturedOptions.speedTest, true);
 });
 
+test('report --redact anonymizes local identifiers and strips the capture file path before buildReport', async () => {
+  const stdout = createWritableCapture();
+  const stderr = createWritableCapture();
+  let capturedParsed = null;
+
+  const exitCode = await runCli(['report', './fixtures/sample-syn.pcap', '--redact'], {
+    stdout: stdout.stream,
+    stderr: stderr.stream,
+    ...createReportFixtureDeps({
+      parseFile: async (filePath) => ({
+        rows: [{ 'Client Addr': '192.168.1.10', 'Client MAC': 'aa:aa:aa:aa:aa:aa', 'Server Addr': '93.184.216.34', 'Server MAC': 'bb:bb:bb:bb:bb:bb' }],
+        diagnostics: { filePath, packetCount: 1, conversationCount: 1, warnings: [] },
+      }),
+      buildReport: async (parsed) => {
+        capturedParsed = parsed;
+        return {
+          findings: { verdict: { headline: 'Inconclusive', confidence: 'Low' } },
+          narrative: { source: 'fallback' },
+          html: '<!doctype html><html><body>report</body></html>',
+          markdown: '# Inconclusive\n\nsample markdown report',
+        };
+      },
+    }),
+  });
+
+  assert.equal(exitCode, 0);
+  assert.equal(capturedParsed.rows[0]['Client Addr'], 'local-device-1');
+  assert.equal(capturedParsed.rows[0]['Client MAC'], 'local-mac-1');
+  assert.equal(capturedParsed.rows[0]['Server Addr'], '93.184.216.34');
+  assert.equal(capturedParsed.diagnostics.filePath, null);
+  assert.equal(stderr.read(), '');
+});
+
 test('report --output writes the selected format to a file and prints a JSON summary', async () => {
   const stdout = createWritableCapture();
   const stderr = createWritableCapture();
@@ -367,60 +400,154 @@ test('deliver orchestrates report email delivery and surfaces sender metadata', 
   assert.equal(stderr.read(), '');
 });
 
-test('paid-report requests payment before the end-to-end report flow', async () => {
+function createPaidReportFixture(overrides = {}) {
+  const requestId = overrides.requestId || 'netdoctor:req-cli';
+  return {
+    requestId,
+    payment: {
+      requestId,
+      product: 'netdoctor',
+      route: '/netdoctor/report',
+      creditsSpent: 500,
+      creditsRemaining: 1000,
+      ...overrides.payment,
+    },
+    capture: overrides.capture !== undefined ? overrides.capture : null,
+    report: {
+      findings: { verdict: { headline: 'Likely local', confidence: 'High' } },
+      narrative: { source: 'fallback' },
+      html: '<!doctype html><html><body>report</body></html>',
+      markdown: '# Likely local\n\nsample markdown report',
+      ...overrides.report,
+    },
+  };
+}
+
+test('paid-report defaults to printing payment receipt + findings/narrative JSON to stdout', async () => {
   const stdout = createWritableCapture();
   const stderr = createWritableCapture();
 
   const exitCode = await runCli([
     'paid-report',
-    'tester@example.com',
     '--interface',
     'en0',
     '--duration',
     '30',
-    '--pdf',
     '--request-id',
     'netdoctor:req-cli',
   ], {
     stdout: stdout.stream,
     stderr: stderr.stream,
     checkTshark: async () => ({ installed: true, version: 'TShark 4.6.0', message: 'tshark detected' }),
-    paidReportRequest: async (options) => ({
+    paidReportRequest: async (options) => createPaidReportFixture({
       requestId: options.requestId,
-      payment: {
-        product: 'netdoctor',
-        route: '/netdoctor/report',
-        creditsSpent: 500,
-        creditsRemaining: 1000,
-      },
-      capture: {
-        interfaceName: options.interfaceName,
-        durationSeconds: options.durationSeconds,
-      },
-      report: {
-        findings: {
-          verdict: { headline: 'Likely local' },
-        },
-      },
-      delivery: {
-        subject: 'e3d netdoctor report: Likely local (2026-07-03)',
-        from: 'e3d netdoctor <support@e3d.ai>',
-        includePdf: options.includePdf,
-        accepted: [options.to],
-        rejected: [],
-        messageId: '<paid-cli@example.com>',
-      },
+      capture: { interfaceName: options.interfaceName, durationSeconds: options.durationSeconds },
     }),
   });
 
   assert.equal(exitCode, 0);
   const output = stdout.read();
   assert.match(output, /Requesting e3d payment before capture\/analysis/);
-  assert.match(output, /"requestId": "netdoctor:req-cli"/);
-  assert.match(output, /"creditsSpent": 500/);
-  assert.match(output, /"interfaceName": "en0"/);
-  assert.match(output, /"verdict": "Likely local"/);
+  const parsed = JSON.parse(output.slice(output.indexOf('{')));
+  assert.equal(parsed.requestId, 'netdoctor:req-cli');
+  assert.equal(parsed.payment.creditsSpent, 500);
+  assert.equal(parsed.capture.interfaceName, 'en0');
+  assert.equal(parsed.findings.verdict.headline, 'Likely local');
   assert.equal(stderr.read(), '');
+});
+
+test('paid-report --format markdown prints the raw markdown to stdout', async () => {
+  const stdout = createWritableCapture();
+  const stderr = createWritableCapture();
+
+  const exitCode = await runCli(['paid-report', '--pcap', './fixtures/sample-syn.pcap', '--format', 'markdown'], {
+    stdout: stdout.stream,
+    stderr: stderr.stream,
+    checkTshark: async () => ({ installed: true, version: 'TShark 4.6.0', message: 'tshark detected' }),
+    paidReportRequest: async () => createPaidReportFixture(),
+  });
+
+  assert.equal(exitCode, 0);
+  assert.match(stdout.read(), /# Likely local\n\nsample markdown report/);
+  assert.equal(stderr.read(), '');
+});
+
+test('paid-report --output writes the selected format to a file and prints a JSON summary', async () => {
+  const stdout = createWritableCapture();
+  const stderr = createWritableCapture();
+  let wroteFile = null;
+
+  const exitCode = await runCli(['paid-report', '--pcap', './fixtures/sample-syn.pcap', '--format', 'html', '--output', './tmp/paid-report.html'], {
+    stdout: stdout.stream,
+    stderr: stderr.stream,
+    checkTshark: async () => ({ installed: true, version: 'TShark 4.6.0', message: 'tshark detected' }),
+    paidReportRequest: async () => createPaidReportFixture(),
+    writeFile: async (filePath, content) => {
+      wroteFile = { filePath, content };
+    },
+  });
+
+  assert.equal(exitCode, 0);
+  const output = stdout.read();
+  const summary = JSON.parse(output.slice(output.indexOf('{')));
+  assert.match(summary.outputPath, /paid-report\.html$/);
+  assert.equal(summary.verdict, 'Likely local');
+  assert.match(wroteFile.content, /<!doctype html>/i);
+  assert.equal(stderr.read(), '');
+});
+
+test('paid-report --to delivers by email and prints a JSON summary with delivery info', async () => {
+  const stdout = createWritableCapture();
+  const stderr = createWritableCapture();
+  let deliverCall = null;
+
+  const exitCode = await runCli(['paid-report', '--pcap', './fixtures/sample-syn.pcap', '--to', 'tester@example.com', '--pdf'], {
+    stdout: stdout.stream,
+    stderr: stderr.stream,
+    checkTshark: async () => ({ installed: true, version: 'TShark 4.6.0', message: 'tshark detected' }),
+    paidReportRequest: async () => createPaidReportFixture(),
+    deliverEmail: async (options) => {
+      deliverCall = options;
+      return {
+        subject: 'e3d netdoctor report: Likely local (2026-07-04)',
+        from: 'e3d netdoctor <support@e3d.ai>',
+        includePdf: true,
+        accepted: ['tester@example.com'],
+        rejected: [],
+        messageId: '<paid-cli-email@example.com>',
+      };
+    },
+  });
+
+  assert.equal(exitCode, 0);
+  assert.equal(deliverCall.to, 'tester@example.com');
+  assert.equal(deliverCall.includePdf, true);
+  const output = stdout.read();
+  const summary = JSON.parse(output.slice(output.indexOf('{')));
+  assert.equal(summary.recipient, 'tester@example.com');
+  assert.equal(summary.messageId, '<paid-cli-email@example.com>');
+  assert.equal(stderr.read(), '');
+});
+
+test('paid-report reports a post-payment failure with the same "no automatic refund" messaging when delivery fails', async () => {
+  const stdout = createWritableCapture();
+  const stderr = createWritableCapture();
+
+  const exitCode = await runCli(['paid-report', '--pcap', './fixtures/sample-syn.pcap', '--to', 'tester@example.com'], {
+    stdout: stdout.stream,
+    stderr: stderr.stream,
+    checkTshark: async () => ({ installed: true, version: 'TShark 4.6.0', message: 'tshark detected' }),
+    paidReportRequest: async () => createPaidReportFixture({ requestId: 'netdoctor:req-delivery-fail' }),
+    deliverEmail: async () => {
+      throw new Error('Missing SMTP password for netdoctor delivery');
+    },
+  });
+
+  assert.equal(exitCode, 1);
+  const errorOutput = stderr.read();
+  assert.match(errorOutput, /failed after payment for request netdoctor:req-delivery-fail/);
+  assert.match(errorOutput, /No automatic refund or credit is issued in v1/);
+  assert.match(errorOutput, /retry with the same request ID/);
 });
 
 test('paid-report --wallet triggers the wallet flow, prints the pay URL, and reports success', async () => {
@@ -430,7 +557,6 @@ test('paid-report --wallet triggers the wallet flow, prints the pay URL, and rep
 
   const exitCode = await runCli([
     'paid-report',
-    'tester@example.com',
     '--pcap',
     './fixtures/sample-syn.pcap',
     '--wallet',
@@ -444,20 +570,7 @@ test('paid-report --wallet triggers the wallet flow, prints the pay URL, and rep
     paidReportRequest: async (options) => {
       receivedOptions = options;
       options.onPayUrl('https://e3d.ai/pay?session=abc123');
-      return {
-        requestId: 'netdoctor:req-wallet',
-        payment: { product: 'netdoctor', route: '/netdoctor/report', creditsSpent: 500, creditsRemaining: 1500 },
-        capture: null,
-        report: { findings: { verdict: { headline: 'Likely local' } } },
-        delivery: {
-          subject: 'e3d netdoctor report: Likely local (2026-07-04)',
-          from: 'e3d netdoctor <support@e3d.ai>',
-          includePdf: false,
-          accepted: [options.to],
-          rejected: [],
-          messageId: '<paid-wallet@example.com>',
-        },
-      };
+      return createPaidReportFixture({ requestId: 'netdoctor:req-wallet', payment: { creditsRemaining: 1500 } });
     },
   });
 
@@ -478,7 +591,6 @@ test('paid-report --wallet without --credits announces one-off payment', async (
 
   const exitCode = await runCli([
     'paid-report',
-    'tester@example.com',
     '--pcap',
     './fixtures/sample-syn.pcap',
     '--wallet',
@@ -487,24 +599,41 @@ test('paid-report --wallet without --credits announces one-off payment', async (
     stdout: stdout.stream,
     stderr: stderr.stream,
     checkTshark: async () => ({ installed: true, version: 'TShark 4.6.0', message: 'tshark detected' }),
-    paidReportRequest: async (options) => ({
-      requestId: 'netdoctor:req-oneoff',
-      payment: { product: 'netdoctor', route: '/netdoctor/report', creditsSpent: 500, creditsRemaining: 0 },
-      capture: null,
-      report: { findings: { verdict: { headline: 'Inconclusive' } } },
-      delivery: {
-        subject: 'e3d netdoctor report: Inconclusive (2026-07-04)',
-        from: 'e3d netdoctor <support@e3d.ai>',
-        includePdf: false,
-        accepted: [options.to],
-        rejected: [],
-        messageId: '<paid-oneoff@example.com>',
-      },
-    }),
+    paidReportRequest: async () => createPaidReportFixture({ requestId: 'netdoctor:req-oneoff', payment: { creditsRemaining: 0 } }),
   });
 
   assert.equal(exitCode, 0);
   assert.match(stdout.read(), /Paying for this one report with a connected wallet/);
+});
+
+test('paid-report --redact forwards redact: true through to paidReportRequest, off by default', async () => {
+  const stdout = createWritableCapture();
+  const stderr = createWritableCapture();
+  let capturedOptions = null;
+
+  const withoutFlag = await runCli(['paid-report', '--pcap', './fixtures/sample-syn.pcap'], {
+    stdout: stdout.stream,
+    stderr: stderr.stream,
+    checkTshark: async () => ({ installed: true, version: 'TShark 4.6.0', message: 'tshark detected' }),
+    paidReportRequest: async (options) => {
+      capturedOptions = options;
+      return createPaidReportFixture();
+    },
+  });
+  assert.equal(withoutFlag, 0);
+  assert.equal(capturedOptions.redact, false);
+
+  const withFlag = await runCli(['paid-report', '--pcap', './fixtures/sample-syn.pcap', '--redact'], {
+    stdout: stdout.stream,
+    stderr: stderr.stream,
+    checkTshark: async () => ({ installed: true, version: 'TShark 4.6.0', message: 'tshark detected' }),
+    paidReportRequest: async (options) => {
+      capturedOptions = options;
+      return createPaidReportFixture();
+    },
+  });
+  assert.equal(withFlag, 0);
+  assert.equal(capturedOptions.redact, true);
 });
 
 test('paid-report --credits without --wallet is rejected', async () => {
@@ -513,7 +642,6 @@ test('paid-report --credits without --wallet is rejected', async () => {
 
   const exitCode = await runCli([
     'paid-report',
-    'tester@example.com',
     '--credits',
     '2000',
   ], {
@@ -532,7 +660,6 @@ test('paid-report --payment-method without --wallet is rejected', async () => {
 
   const exitCode = await runCli([
     'paid-report',
-    'tester@example.com',
     '--payment-method',
     'base',
   ], {
@@ -552,7 +679,6 @@ test('paid-report --wallet --payment-method base is accepted and overrides the d
 
   const exitCode = await runCli([
     'paid-report',
-    'tester@example.com',
     '--pcap',
     './fixtures/sample-syn.pcap',
     '--wallet',
@@ -566,20 +692,7 @@ test('paid-report --wallet --payment-method base is accepted and overrides the d
     paidReportRequest: async (options) => {
       receivedOptions = options;
       options.onPayUrl('https://e3d.ai/pay?session=abc456');
-      return {
-        requestId: 'netdoctor:req-wallet-base',
-        payment: { product: 'netdoctor', route: '/netdoctor/report', creditsSpent: 500, creditsRemaining: 0 },
-        capture: null,
-        report: { findings: { verdict: { headline: 'Likely local' } } },
-        delivery: {
-          subject: 'e3d netdoctor report: Likely local (2026-07-04)',
-          from: 'e3d netdoctor <support@e3d.ai>',
-          includePdf: false,
-          accepted: [options.to],
-          rejected: [],
-          messageId: '<paid-wallet-base@example.com>',
-        },
-      };
+      return createPaidReportFixture({ requestId: 'netdoctor:req-wallet-base', payment: { creditsRemaining: 0 } });
     },
   });
 
@@ -594,7 +707,6 @@ test('paid-report --wallet --payment-method rejects an unsupported value', async
 
   const exitCode = await runCli([
     'paid-report',
-    'tester@example.com',
     '--wallet',
     '0xABCDEF0000000000000000000000000000000001',
     '--payment-method',
@@ -607,4 +719,103 @@ test('paid-report --wallet --payment-method rejects an unsupported value', async
 
   assert.equal(exitCode, 1);
   assert.match(stderr.read(), /--payment-method must be one of: ethereum, base/);
+});
+
+function createMintReportFixture(overrides = {}) {
+  return JSON.stringify({
+    redacted: true,
+    findings: { verdict: { headline: 'Likely local', confidence: 'High' } },
+    narrative: { source: 'fallback' },
+    ...overrides,
+  });
+}
+
+test('mint rejects a report that was not generated with --redact', async () => {
+  const stdout = createWritableCapture();
+  const stderr = createWritableCapture();
+
+  const exitCode = await runCli(['mint', './tmp/report.json', '--wallet', '0xABCDEF0000000000000000000000000000000001', '--confirm-public'], {
+    stdout: stdout.stream,
+    stderr: stderr.stream,
+    readFile: async () => createMintReportFixture({ redacted: false }),
+  });
+
+  assert.equal(exitCode, 1);
+  assert.match(stderr.read(), /wasn't generated with --redact/);
+});
+
+test('mint rejects when --confirm-public is missing', async () => {
+  const stdout = createWritableCapture();
+  const stderr = createWritableCapture();
+
+  const exitCode = await runCli(['mint', './tmp/report.json', '--wallet', '0xABCDEF0000000000000000000000000000000001'], {
+    stdout: stdout.stream,
+    stderr: stderr.stream,
+    readFile: async () => createMintReportFixture(),
+  });
+
+  assert.equal(exitCode, 1);
+  assert.match(stderr.read(), /requires --confirm-public/);
+});
+
+test('mint rejects when --wallet is missing', async () => {
+  const stdout = createWritableCapture();
+  const stderr = createWritableCapture();
+
+  const exitCode = await runCli(['mint', './tmp/report.json', '--confirm-public'], {
+    stdout: stdout.stream,
+    stderr: stderr.stream,
+    readFile: async () => createMintReportFixture(),
+  });
+
+  assert.equal(exitCode, 1);
+  assert.match(stderr.read(), /requires --wallet/);
+});
+
+test('mint requires a report file path', async () => {
+  const stdout = createWritableCapture();
+  const stderr = createWritableCapture();
+
+  const exitCode = await runCli(['mint'], {
+    stdout: stdout.stream,
+    stderr: stderr.stream,
+  });
+
+  assert.equal(exitCode, 1);
+  assert.match(stderr.read(), /mint requires a report JSON file path/);
+});
+
+test('mint reads a redacted report, mints via wallet, and prints the mint result', async () => {
+  const stdout = createWritableCapture();
+  const stderr = createWritableCapture();
+  let capturedArgs = null;
+  let capturedPath = null;
+
+  const exitCode = await runCli(['mint', './tmp/report.json', '--wallet', '0xABCDEF0000000000000000000000000000000001', '--confirm-public'], {
+    stdout: stdout.stream,
+    stderr: stderr.stream,
+    readFile: async (filePath) => {
+      capturedPath = filePath;
+      return createMintReportFixture();
+    },
+    mintReportViaWallet: async (args) => {
+      capturedArgs = args;
+      args.onMintUrl('https://e3d.ai/mint?session=sess-1');
+      return { tokenId: 42, txHash: '0xabc' };
+    },
+  });
+
+  assert.equal(exitCode, 0);
+  assert.match(capturedPath, /report\.json$/);
+  assert.equal(capturedArgs.wallet, '0xABCDEF0000000000000000000000000000000001');
+  assert.equal(capturedArgs.findings.verdict.headline, 'Likely local');
+  assert.match(capturedArgs.name, /Likely local/);
+  const output = stdout.read();
+  assert.match(output, /https:\/\/e3d\.ai\/mint\?session=sess-1/);
+  assert.match(output, /Waiting for mint to complete/);
+  const summary = JSON.parse(output.slice(output.indexOf('{')));
+  assert.equal(summary.tokenId, 42);
+  assert.equal(summary.txHash, '0xabc');
+  assert.equal(summary.etherscanUrl, 'https://etherscan.io/tx/0xabc');
+  assert.equal(stderr.read(), '');
 });

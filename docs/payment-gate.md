@@ -8,6 +8,13 @@ The v1 netdoctor report price is **500 e3d product-payment credits per report**.
 
 The CLI enforces this expected spend amount locally after the e3d payment API responds. If the API reports a smaller spend, including a zero-credit route, netdoctor stops instead of generating an underpaid report.
 
+## Output
+
+`paid-report` defaults to printing JSON to stdout (payment receipt +
+`findings`/`narrative`) — it does not automatically email the report. `--format
+markdown|html`, `--output <file>`, and `--to <email>` work exactly like they do
+on `report`; email delivery is opt-in via `--to`, not a side effect of paying.
+
 ## Wallet payments (`--wallet`)
 
 `paid-report --wallet <address>` pays without a pre-provisioned credit key, by

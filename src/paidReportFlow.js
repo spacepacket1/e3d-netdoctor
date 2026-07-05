@@ -2,7 +2,7 @@ import path from 'node:path';
 
 import { parsePcapFile } from './e3dPcap.js';
 import { captureLiveTraffic } from './liveCapture.js';
-import { generateAndDeliverReport } from './deliveryOrchestration.js';
+import { generateReport } from './reportGeneration.js';
 import {
   buildNetdoctorRequestId,
   createNetdoctorPaymentsClient,
@@ -12,6 +12,16 @@ import {
   recordWalletSpend,
   resolveCreditKeyViaWallet,
 } from './walletPaymentFlow.js';
+import { anonymizeLocalIdentifiers } from './reportRedaction.js';
+
+function applyRedaction(parsed, redact) {
+  if (!redact) return parsed;
+  return {
+    ...parsed,
+    rows: anonymizeLocalIdentifiers(parsed.rows),
+    diagnostics: { ...parsed.diagnostics, filePath: null },
+  };
+}
 
 export class NetdoctorPostPaymentFailureError extends Error {
   constructor(message, details = {}) {
@@ -22,7 +32,7 @@ export class NetdoctorPostPaymentFailureError extends Error {
   }
 }
 
-function wrapPostPaymentFailure(error, payment) {
+export function wrapPostPaymentFailure(error, payment) {
   const cause = error?.message || String(error);
   return new NetdoctorPostPaymentFailureError(
     `Netdoctor report failed after payment for request ${payment.requestId}: ${cause}. No automatic refund or credit is issued in v1; retry with the same request ID to reuse the idempotent payment record and avoid a duplicate charge.`,
@@ -37,7 +47,7 @@ export async function runPaidReportRequest(options = {}) {
   const captureLive = options.captureLive || ((captureOptions) => (
     captureLiveTraffic({ ...captureOptions, parseFile })
   ));
-  const orchestrateDelivery = options.orchestrateDelivery || generateAndDeliverReport;
+  const buildReport = options.buildReport || generateReport;
 
   const usingWallet = Boolean(options.wallet);
   const oneOff = usingWallet && !options.credits;
@@ -83,27 +93,19 @@ export async function runPaidReportRequest(options = {}) {
         durationSeconds: options.durationSeconds,
       });
 
-    const parsed = captureResult
-      ? captureResult.parsed
-      : await parseFile(path.resolve(options.pcapPath));
+    const parsed = applyRedaction(
+      captureResult ? captureResult.parsed : await parseFile(path.resolve(options.pcapPath)),
+      options.redact,
+    );
 
-    const deliveryResult = await orchestrateDelivery(parsed, {
-      to: options.to,
-      includePdf: options.includePdf,
-      buildReport: options.buildReport,
-      deliverReport: options.deliverReport,
-      mailer: options.mailer,
-      createPdf: options.createPdf,
-      reportOptions: options.reportOptions,
-    });
+    const report = await buildReport(parsed, options.reportOptions);
 
     return {
       requestId,
       payment,
       capture: captureResult?.capture || null,
       parsed,
-      report: deliveryResult.report,
-      delivery: deliveryResult.delivery,
+      report,
     };
   } catch (error) {
     throw wrapPostPaymentFailure(error, payment);

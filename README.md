@@ -12,15 +12,21 @@ prose to re-parse and no UI to drive.
 No dashboard. No account. No continuous monitoring. Run it, get an answer, move on.
 
 ```
-$ e3d-netdoctor paid-report you@example.com --interface en0 --duration 30
+$ e3d-netdoctor paid-report --interface en0 --duration 30
 
 Only analyze traffic on networks you are authorized to monitor.
 Requesting e3d payment before capture/analysis...
 {
-  "verdict": "Likely upstream/ISP",
-  "confidence": "High",
-  "rationale": "7 of 8 independent destinations affected, spanning 3 different providers",
-  "subject": "e3d netdoctor report: Likely upstream/ISP (2026-07-04)"
+  "requestId": "netdoctor:...",
+  "payment": { "product": "netdoctor", "creditsSpent": 500, "creditsRemaining": 1500 },
+  "findings": {
+    "verdict": {
+      "headline": "Likely upstream/ISP",
+      "confidence": "High",
+      "rationale": "7 of 8 independent destinations affected, spanning 3 different providers"
+    }
+  },
+  "narrative": { "..." : "..." }
 }
 ```
 
@@ -87,10 +93,13 @@ by hand. netdoctor does, every time, and shows its work.
 
 ## Paying for a report
 
-`paid-report` (and the `--wallet` flag) run the same capture → verdict → report
-pipeline above, gated behind one payment of **500 e3d credits (0.5 E3D or wE3D at
-the current unit price, depending on payment method)**. There are two ways to
-pay, aimed at two different users:
+`paid-report` runs the same capture → verdict → report pipeline above, gated
+behind one payment of **500 e3d credits (0.5 E3D or wE3D at the current unit
+price, depending on payment method)**. Like `report`, it defaults to printing
+JSON to stdout — here that's the payment receipt plus `findings`/`narrative` —
+with `--format`/`--output`/`--to` working exactly the same way; email is opt-in
+via `--to`, not automatic. There are two ways to pay, aimed at two different
+users:
 
 - **A pre-provisioned credit key** (`NETDOCTOR_PAYMENT_CREDIT_KEY`) — for
   automation, CI, or anyone who already has an e3d account funded ahead of time.
@@ -99,7 +108,7 @@ pay, aimed at two different users:
   with E3D Token, with no e3d account or pre-funded credit key at all:
 
   ```bash
-  e3d-netdoctor paid-report you@example.com --interface en0 --wallet 0xYourAddress
+  e3d-netdoctor paid-report --interface en0 --wallet 0xYourAddress
   ```
 
   netdoctor prints a one-time URL; open it, connect MetaMask, and approve a single
@@ -118,7 +127,7 @@ pay, aimed at two different users:
   - **`base`** — pay with **wE3D** on Base; usually lower gas fees.
 
   ```bash
-  e3d-netdoctor paid-report you@example.com --interface en0 --wallet 0xYourAddress --payment-method base
+  e3d-netdoctor paid-report --interface en0 --wallet 0xYourAddress --payment-method base
   ```
 
   Two spending modes (independent of which chain you pick):
@@ -167,17 +176,58 @@ uses real bandwidth and adds several seconds to the run:
 e3d-netdoctor report ./fixtures/retransmission-handshake.pcap --speed-test
 ```
 
+Add `--redact` before sharing or publishing a report: it replaces your local
+IPs/MACs with stable pseudonyms (`local-device-1`, `local-device-2`, ...) and
+strips the local capture file path, while leaving external destination IPs and
+ISP traceroute hostnames real — that's the verifiable evidence the report
+exists to show, only your own network's identity is hidden. This is also the
+precondition for `mint` (below) — nothing gets published or tokenized with
+your home network's real IPs/MACs in it.
+
+```bash
+e3d-netdoctor report ./fixtures/retransmission-handshake.pcap --redact --output report.json
+```
+
+## Minting a report as an NFT
+
+`mint` tokenizes an already-`--redact`ed report as an NFT via `E3DNFTManager`
+(the same shared contract used across E3D products — no netdoctor-specific
+contract). It requires the saved report file to have `redacted: true` (refuses
+otherwise) and `--confirm-public`, since minting pins the report to IPFS
+**permanently and publicly**:
+
+```bash
+e3d-netdoctor mint report.json --wallet 0xYourAddress --confirm-public
+```
+
+netdoctor renders an HTML certificate (from the saved findings/narrative) and
+a PNG screenshot of it, uploads both plus the structured findings to IPFS via
+e3d.ai, then prints a one-time `https://e3d.ai/mint?session=...` URL — open
+it, connect MetaMask, and approve the mint (same no-custodial-keys model as
+`--wallet` payments: your wallet signs directly, netdoctor and e3d.ai never
+see or touch it). Minting always happens on **Ethereum mainnet** regardless of
+which `--payment-method` was used to pay for the report itself, and costs
+**100 E3D + gas** — a separate cost from the 500 credits spent generating the
+report. Once confirmed, netdoctor prints `{tokenId, txHash, etherscanUrl}`.
+
 Full command list:
 
 ```
 preflight                                  Check whether tshark is installed locally.
 smoke <file.pcap>                          Parse a capture, print rows/diagnostics.
 capture [iface] [seconds]                  Run a live tshark capture (default 30s).
-report <pcap> [--format json|markdown|html] [--output file] [--to email] [--pdf] [--no-system-diagnostics] [--speed-test]
+report <pcap> [--format json|markdown|html] [--output file] [--to email] [--pdf] [--no-system-diagnostics] [--speed-test] [--redact]
                                             Defaults to JSON on stdout; --format selects markdown/html;
                                             --output writes to a file; --to emails it (--pdf attaches a PDF).
 deliver <pcap> <to> [--pdf] [--no-system-diagnostics] [--speed-test]
-paid-report <to> [--pcap file | --interface iface] [--duration s] [--pdf] [--request-id id] [--speed-test]
+paid-report [--pcap file | --interface iface] [--duration s] [--format json|markdown|html]
+            [--output file] [--to email] [--pdf] [--request-id id] [--speed-test] [--redact]
+            [--wallet address [--credits n] [--payment-method ethereum|base]]
+                                            Same defaults/flags as report, gated behind a 500-credit
+                                            payment (credit key or --wallet).
+mint <report.json> --wallet address --confirm-public [--name "..."] [--description "..."]
+                                            Tokenize a --redact'd report as an NFT (E3DNFTManager,
+                                            Ethereum mainnet). 100 E3D + gas, paid from --wallet.
 ```
 
 Every capture/analysis entrypoint prints a reminder up front:

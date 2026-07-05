@@ -6,29 +6,21 @@ import {
   runPaidReportRequest,
 } from '../src/paidReportFlow.js';
 
-function createDeliveryResult(options = {}) {
+function createFakeReport(options = {}) {
   return {
-    report: {
-      findings: {
-        verdict: { headline: options.verdict || 'Likely upstream/ISP' },
-      },
+    findings: {
+      verdict: { headline: options.verdict || 'Likely upstream/ISP', confidence: 'High' },
     },
-    delivery: {
-      subject: 'e3d netdoctor report: Likely upstream/ISP (2026-07-03)',
-      from: 'e3d netdoctor <support@e3d.ai>',
-      includePdf: true,
-      accepted: ['tester@example.com'],
-      rejected: [],
-      messageId: '<paid-flow@example.com>',
-    },
+    narrative: { source: 'fallback' },
+    html: '<!doctype html><html><body>report</body></html>',
+    markdown: '# report',
   };
 }
 
-test('runPaidReportRequest pays before live capture and runs the full pipeline', async () => {
+test('runPaidReportRequest pays before live capture and builds the report', async () => {
   const events = [];
 
   const result = await runPaidReportRequest({
-    to: 'tester@example.com',
     includePdf: true,
     requestId: 'netdoctor:req-live-success',
     ensurePayment: async ({ requestId }) => {
@@ -52,9 +44,9 @@ test('runPaidReportRequest pays before live capture and runs the full pipeline',
         },
       };
     },
-    orchestrateDelivery: async (parsed, { to, includePdf }) => {
-      events.push(`deliver:${to}:${includePdf}:${parsed.diagnostics.packetCount}`);
-      return createDeliveryResult();
+    buildReport: async (parsed) => {
+      events.push(`build:${parsed.diagnostics.packetCount}`);
+      return createFakeReport();
     },
     interfaceName: 'en0',
     durationSeconds: 30,
@@ -63,19 +55,64 @@ test('runPaidReportRequest pays before live capture and runs the full pipeline',
   assert.deepEqual(events, [
     'pay:netdoctor:req-live-success',
     'capture:en0:30',
-    'deliver:tester@example.com:true:12',
+    'build:12',
   ]);
   assert.equal(result.payment.creditsSpent, 500);
   assert.equal(result.capture.interfaceName, 'en0');
   assert.equal(result.report.findings.verdict.headline, 'Likely upstream/ISP');
+  assert.equal(result.delivery, undefined);
 });
 
-test('runPaidReportRequest does not parse, capture, or deliver after failed payment', async () => {
+test('runPaidReportRequest with redact: true anonymizes local identifiers and strips the file path before buildReport', async () => {
+  let capturedParsed = null;
+
+  await runPaidReportRequest({
+    requestId: 'netdoctor:req-redact',
+    redact: true,
+    ensurePayment: async ({ requestId }) => ({ ok: true, requestId, product: 'netdoctor', route: '/netdoctor/report', creditsSpent: 500, creditsRemaining: 500 }),
+    pcapPath: './fixtures/sample-syn.pcap',
+    parseFile: async (filePath) => ({
+      rows: [{ 'Client Addr': '192.168.1.10', 'Client MAC': 'aa:aa:aa:aa:aa:aa', 'Server Addr': '93.184.216.34', 'Server MAC': 'bb:bb:bb:bb:bb:bb' }],
+      diagnostics: { filePath, packetCount: 1, conversationCount: 1, warnings: [] },
+    }),
+    buildReport: async (parsed) => {
+      capturedParsed = parsed;
+      return createFakeReport();
+    },
+  });
+
+  assert.equal(capturedParsed.rows[0]['Client Addr'], 'local-device-1');
+  assert.equal(capturedParsed.rows[0]['Client MAC'], 'local-mac-1');
+  assert.equal(capturedParsed.rows[0]['Server Addr'], '93.184.216.34');
+  assert.equal(capturedParsed.diagnostics.filePath, null);
+});
+
+test('runPaidReportRequest without redact leaves rows and the file path untouched', async () => {
+  let capturedParsed = null;
+
+  await runPaidReportRequest({
+    requestId: 'netdoctor:req-no-redact',
+    ensurePayment: async ({ requestId }) => ({ ok: true, requestId, product: 'netdoctor', route: '/netdoctor/report', creditsSpent: 500, creditsRemaining: 500 }),
+    pcapPath: './fixtures/sample-syn.pcap',
+    parseFile: async (filePath) => ({
+      rows: [{ 'Client Addr': '192.168.1.10', 'Client MAC': 'aa:aa:aa:aa:aa:aa', 'Server Addr': '93.184.216.34' }],
+      diagnostics: { filePath, packetCount: 1, conversationCount: 1, warnings: [] },
+    }),
+    buildReport: async (parsed) => {
+      capturedParsed = parsed;
+      return createFakeReport();
+    },
+  });
+
+  assert.equal(capturedParsed.rows[0]['Client Addr'], '192.168.1.10');
+  assert.match(capturedParsed.diagnostics.filePath, /sample-syn\.pcap$/);
+});
+
+test('runPaidReportRequest does not parse, capture, or build after failed payment', async () => {
   const events = [];
 
   await assert.rejects(
     () => runPaidReportRequest({
-      to: 'tester@example.com',
       requestId: 'netdoctor:req-payment-fail',
       ensurePayment: async () => {
         events.push('pay');
@@ -87,8 +124,8 @@ test('runPaidReportRequest does not parse, capture, or deliver after failed paym
       captureLive: async () => {
         events.push('capture');
       },
-      orchestrateDelivery: async () => {
-        events.push('deliver');
+      buildReport: async () => {
+        events.push('build');
       },
       pcapPath: './fixtures/sample-syn.pcap',
     }),
@@ -102,7 +139,6 @@ test('runPaidReportRequest resolves a credit key via wallet before paying, in on
   const events = [];
 
   const result = await runPaidReportRequest({
-    to: 'tester@example.com',
     requestId: 'netdoctor:req-wallet-oneoff',
     wallet: '0xWallet',
     resolveCreditKeyViaWallet: async ({ wallet, oneOff, paymentClient }) => {
@@ -117,7 +153,7 @@ test('runPaidReportRequest resolves a credit key via wallet before paying, in on
       events.push('recordSpend');
     },
     captureLive: async () => ({ capture: {}, parsed: { rows: [], diagnostics: { packetCount: 0, conversationCount: 0, warnings: [] } } }),
-    orchestrateDelivery: async () => createDeliveryResult(),
+    buildReport: async () => createFakeReport(),
   });
 
   assert.deepEqual(events, [
@@ -131,7 +167,6 @@ test('runPaidReportRequest forwards options.paymentMethod to resolveCreditKeyVia
   const events = [];
 
   await runPaidReportRequest({
-    to: 'tester@example.com',
     requestId: 'netdoctor:req-wallet-payment-method',
     wallet: '0xWallet',
     paymentMethod: 'ethereum',
@@ -141,7 +176,7 @@ test('runPaidReportRequest forwards options.paymentMethod to resolveCreditKeyVia
     },
     ensurePayment: async () => ({ ok: true, requestId: 'netdoctor:req-wallet-payment-method', product: 'netdoctor', route: '/netdoctor/report', creditsSpent: 500, creditsRemaining: 0 }),
     captureLive: async () => ({ capture: {}, parsed: { rows: [], diagnostics: { packetCount: 0, conversationCount: 0, warnings: [] } } }),
-    orchestrateDelivery: async () => createDeliveryResult(),
+    buildReport: async () => createFakeReport(),
   });
 
   assert.deepEqual(events, ['resolve:ethereum']);
@@ -151,7 +186,6 @@ test('runPaidReportRequest treats --wallet with --credits as batch mode and reco
   const events = [];
 
   await runPaidReportRequest({
-    to: 'tester@example.com',
     requestId: 'netdoctor:req-wallet-batch',
     wallet: '0xWallet',
     credits: 2000,
@@ -164,7 +198,7 @@ test('runPaidReportRequest treats --wallet with --credits as batch mode and reco
       events.push(`recordSpend:${wallet}:${creditsRemaining}`);
     },
     captureLive: async () => ({ capture: {}, parsed: { rows: [], diagnostics: { packetCount: 0, conversationCount: 0, warnings: [] } } }),
-    orchestrateDelivery: async () => createDeliveryResult(),
+    buildReport: async () => createFakeReport(),
   });
 
   assert.deepEqual(events, [
@@ -177,7 +211,6 @@ test('runPaidReportRequest does not record wallet spend in one-off mode', async 
   let recordSpendCalled = false;
 
   await runPaidReportRequest({
-    to: 'tester@example.com',
     requestId: 'netdoctor:req-wallet-oneoff-2',
     wallet: '0xWallet',
     resolveCreditKeyViaWallet: async () => ({ creditKey: 'e3d_netdoctor_pay_wallet', source: 'purchased', creditsRemaining: 0 }),
@@ -186,7 +219,7 @@ test('runPaidReportRequest does not record wallet spend in one-off mode', async 
       recordSpendCalled = true;
     },
     captureLive: async () => ({ capture: {}, parsed: { rows: [], diagnostics: { packetCount: 0, conversationCount: 0, warnings: [] } } }),
-    orchestrateDelivery: async () => createDeliveryResult(),
+    buildReport: async () => createFakeReport(),
   });
 
   assert.equal(recordSpendCalled, false);
@@ -195,7 +228,6 @@ test('runPaidReportRequest does not record wallet spend in one-off mode', async 
 test('runPaidReportRequest documents post-payment retry behavior on downstream failure', async () => {
   await assert.rejects(
     () => runPaidReportRequest({
-      to: 'tester@example.com',
       requestId: 'netdoctor:req-capture-fail',
       ensurePayment: async ({ requestId }) => ({
         ok: true,
