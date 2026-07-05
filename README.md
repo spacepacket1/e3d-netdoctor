@@ -2,9 +2,12 @@
 
 **Point it at your network. Get told why it's slow.**
 
-A one-shot, agentic, no-UI CLI that captures live traffic, figures out whether your
-slowdown is your ISP, your own device, or one flaky destination — and emails you a
-plain-English report that says so, with its reasoning shown, not a black-box score.
+A one-shot, no-UI CLI that captures live traffic and figures out whether your
+slowdown is your ISP, your own device, or one flaky destination — with its
+reasoning shown, not a black-box score. It's just as useful run by hand as it
+is scripted into automation, and it's built especially well for agents: the
+default output is the same structured JSON an agent already reasons over, no
+prose to re-parse and no UI to drive.
 
 No dashboard. No account. No continuous monitoring. Run it, get an answer, move on.
 
@@ -32,6 +35,24 @@ retransmissions and RTT outliers by destination **and** by local device, and wei
 provider diversity instead of raw destination count. Most people don't do that math
 by hand. netdoctor does, every time, and shows its work.
 
+## Humans, automation, and agents — but agents especially
+
+- **Humans** get a one-shot answer without learning Wireshark: run `report`, read a
+  plain-English verdict with its reasoning, done. `--format markdown`/`html` and
+  `--to` make it easy to read in a terminal, a browser, or an inbox.
+- **Automation/CI** gets deterministic exit codes, no interactive prompts, and a
+  non-interactive payment path (a pre-provisioned e3d credit key) — safe to run
+  unattended on a schedule or in a pipeline.
+- **Agents get the most out of it**, because the whole tool is shaped like a single
+  tool call: one command, one JSON result. The default `report` output is
+  `{ findings, narrative }` — the same structured shape an agent already reasons
+  over, not prose it has to re-parse. The verdict is deterministic and rule-based
+  (not another LLM call an agent has to trust blindly), the rationale is
+  machine-readable text an agent can quote directly back to a user, and there's no
+  UI, login, or browser interaction required for the core flow — only the optional
+  wallet payment path below touches a browser, and only because that step
+  inherently requires a human to approve a transaction.
+
 ## What it actually does
 
 1. **Captures** a short live packet trace (`tshark`), or takes a `.pcap` you already have.
@@ -41,7 +62,7 @@ by hand. netdoctor does, every time, and shows its work.
 3. **Corroborates** with host-level checks that don't depend on the capture at all —
    real `ping` and `traceroute` to the destinations the capture flagged, and `netstat`
    for local NIC error/collision counters and TCP-stack retransmit stats.
-4. **Scores a verdict** — deterministic, rule-based, unit-tested — into one of four
+4. **Scores a verdict** — deterministic, rule-based, unit-tested — into one of three
    categories:
 
    | Verdict | Means |
@@ -49,17 +70,60 @@ by hand. netdoctor does, every time, and shows its work.
    | **Likely Upstream/ISP** | Signal spread across many unrelated destinations and providers — not one device |
    | **Likely Local** | Signal concentrated on one local device (MAC) across many destinations — bad wifi, flaky NIC, bad cabling |
    | **Likely Destination/Path-Specific** | Signal confined to one or two destinations while everything else is clean |
-   | **Inconclusive** | Not enough traffic to make a credible call — and it says so, instead of guessing |
 
    Confidence is always shown as reasoning ("7 of 8 destinations, 3 providers"),
-   never a bare number. A confident wrong call costs more trust with this audience
-   than an honest "inconclusive."
+   never a bare number. netdoctor always commits to one of these three — it never
+   answers "inconclusive." With thin data it still picks the closest match and says
+   so plainly in the rationale ("only 2 of the required 3 distinct destinations were
+   observed"), rather than declining to call it.
 5. **Writes the report** — an executive summary and per-section narrative from
    Claude, grounded strictly in the structured findings (never raw packets), with a
    deterministic fallback if no API key is configured.
 6. **Delivers it** by email, with an optional PDF attachment.
 7. **Gates it** behind an e3d pay-per-report payment — fails closed, no free runs,
-   clear message on how to pay if it's missing.
+   clear message on how to pay if it's missing. Pay with a pre-provisioned credit
+   key (for automation), or with an E3D Token (wE3D) wallet directly (for a human
+   with no e3d account) — see [Paying for a report](#paying-for-a-report) below.
+
+## Paying for a report
+
+`paid-report` (and the `--wallet` flag) run the same capture → verdict → report
+pipeline above, gated behind one payment of **500 e3d credits (0.5 wE3D at the
+current unit price)**. There are two ways to pay, aimed at two different users:
+
+- **A pre-provisioned credit key** (`NETDOCTOR_PAYMENT_CREDIT_KEY`) — for
+  automation, CI, or anyone who already has an e3d account funded ahead of time.
+  Non-interactive: no browser, no prompts, safe to run unattended on a schedule.
+- **`--wallet <address>`** — for a human who wants to pay for a report directly
+  with E3D Token, with no e3d account or pre-funded credit key at all:
+
+  ```bash
+  e3d-netdoctor paid-report you@example.com --interface en0 --wallet 0xYourAddress
+  ```
+
+  netdoctor prints a one-time URL; open it, connect MetaMask, and approve a single
+  wE3D transfer. netdoctor polls in the background and picks up automatically once
+  the payment is confirmed — nothing to copy/paste back into the terminal.
+
+  The benefit over the credit-key path isn't just convenience: **your wallet's
+  private key never touches netdoctor or any e3d server.** The browser talks
+  directly to your wallet and only ever reports a transaction hash back — never a
+  secret. netdoctor never sees, asks for, or stores a private key, and you never
+  manually handle a tx hash or credit key either; the whole exchange happens over
+  a short-lived, single-use payment session it polls for you.
+
+  Two spending modes:
+  - **One-off** (`--wallet <address>`, no `--credits`): pay for exactly this one
+    report. Nothing is saved locally — the next `paid-report` starts a fresh
+    payment.
+  - **Batch** (`--wallet <address> --credits n`): buy a reusable batch of `n`
+    credits once; the resulting credit key is saved to
+    `~/.config/e3d-netdoctor/config.json` (keyed by wallet address) and reused
+    automatically by future `paid-report --wallet` runs until it runs low —
+    fewer wallet approvals if you run reports regularly.
+
+See [`docs/payment-gate.md`](docs/payment-gate.md) for the credit-key flow's
+configuration and failure-mode details.
 
 ## Quickstart
 
@@ -85,17 +149,26 @@ e3d-netdoctor report ./fixtures/retransmission-handshake.pcap --to you@example.c
 When `--output` and/or `--to` are used, `report` prints a small JSON summary
 (verdict, confidence, output path, delivery info) instead of the raw content.
 
+Add `--speed-test` to also run a real download/upload throughput measurement
+(against a public Cloudflare speed-test endpoint) and fold the Mbps numbers
+into the System Diagnostics section. It's opt-in — off by default — since it
+uses real bandwidth and adds several seconds to the run:
+
+```bash
+e3d-netdoctor report ./fixtures/retransmission-handshake.pcap --speed-test
+```
+
 Full command list:
 
 ```
 preflight                                  Check whether tshark is installed locally.
 smoke <file.pcap>                          Parse a capture, print rows/diagnostics.
 capture [iface] [seconds]                  Run a live tshark capture (default 30s).
-report <pcap> [--format json|markdown|html] [--output file] [--to email] [--pdf] [--no-system-diagnostics]
+report <pcap> [--format json|markdown|html] [--output file] [--to email] [--pdf] [--no-system-diagnostics] [--speed-test]
                                             Defaults to JSON on stdout; --format selects markdown/html;
                                             --output writes to a file; --to emails it (--pdf attaches a PDF).
-deliver <pcap> <to> [--pdf] [--no-system-diagnostics]
-paid-report <to> [--pcap file | --interface iface] [--duration s] [--pdf] [--request-id id]
+deliver <pcap> <to> [--pdf] [--no-system-diagnostics] [--speed-test]
+paid-report <to> [--pcap file | --interface iface] [--duration s] [--pdf] [--request-id id] [--speed-test]
 ```
 
 Every capture/analysis entrypoint prints a reminder up front:
@@ -126,13 +199,6 @@ internet access.
 | Email delivery | `NETDOCTOR_SMTP_HOST`, `NETDOCTOR_SMTP_PORT`, `NETDOCTOR_SMTP_SECURE`, `NETDOCTOR_SMTP_USER`, `NETDOCTOR_SMTP_PASSWORD` |
 | PDF export | `NETDOCTOR_BROWSER_PATH` (auto-detected otherwise) |
 | Payment gate | `NETDOCTOR_PAYMENT_CREDIT_KEY`, `NETDOCTOR_PAYMENT_SERVICE_KEY`, `E3D_BASE_URL` — see [`docs/payment-gate.md`](docs/payment-gate.md) |
-
-## Non-goals (v1)
-
-Deliberately out of scope for now — see [`docs/netdoctor-spec.md`](docs/netdoctor-spec.md)
-for the full reasoning: security/plaintext-protocol flags, continuous monitoring or
-learned baselines, dual capture points, AWS traffic correlation, credits/subscription
-pricing.
 
 ## Testing
 
