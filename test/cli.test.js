@@ -112,52 +112,174 @@ test('capture rejects invalid duration arguments', async () => {
   assert.match(stderr.read(), /capture duration must be a positive whole number of seconds/);
 });
 
-test('report writes a standalone HTML report file summary', async () => {
-  const stdout = createWritableCapture();
-  const stderr = createWritableCapture();
-  let wroteFile = null;
+function parseTrailingJson(output) {
+  return JSON.parse(output.slice(output.indexOf('{')));
+}
 
-  const exitCode = await runCli(['report', './fixtures/sample-syn.pcap', './tmp/netdoctor-report.html'], {
-    stdout: stdout.stream,
-    stderr: stderr.stream,
+function createReportFixtureDeps(overrides = {}) {
+  return {
     checkTshark: async () => ({ installed: true, version: 'TShark 4.6.0', message: 'tshark detected' }),
     parseFile: async (filePath) => ({
-      rows: [{ 'Client Addr': '192.168.0.1', 'Client Port': '40000', 'Server Addr': '93.184.216.34', 'Server Port': '443', 'Client Bytes': 1200, 'Server Bytes': 800, Packets: 10, Protocol: 'tcp' }],
-      diagnostics: {
-        filePath,
-        packetCount: 10,
-        conversationCount: 1,
-        warnings: [],
-        protocolBreakdown: [{ protocol: 'tcp', packets: 10, bytes: 2000 }],
-        verdict: {
-          verdict: 'Inconclusive',
-          confidence: 'Low',
-          rationale: 'Confidence: Low - sample traffic is too thin.',
-        },
-        tcpAnalysis: {
-          retransmissions: 0,
-          duplicateAcks: 0,
-          outOfOrder: 0,
-          rttMs: { count: 0, minMs: null, p50Ms: null, p95Ms: null, maxMs: null },
-        },
-      },
+      rows: [],
+      diagnostics: { filePath, packetCount: 10, conversationCount: 1, warnings: [] },
     }),
     buildReport: async () => ({
       findings: { verdict: { headline: 'Inconclusive', confidence: 'Low' } },
       narrative: { source: 'fallback' },
       html: '<!doctype html><html><body>report</body></html>',
+      markdown: '# Inconclusive\n\nsample markdown report',
     }),
-    writeFile: async (filePath, html) => {
-      wroteFile = { filePath, html };
-    },
+    ...overrides,
+  };
+}
+
+test('report defaults to printing {findings, narrative} JSON to stdout', async () => {
+  const stdout = createWritableCapture();
+  const stderr = createWritableCapture();
+
+  const exitCode = await runCli(['report', './fixtures/sample-syn.pcap'], {
+    stdout: stdout.stream,
+    stderr: stderr.stream,
+    ...createReportFixtureDeps(),
   });
 
   assert.equal(exitCode, 0);
-  assert.match(stdout.read(), /"outputPath":/);
-  assert.match(stdout.read(), /"narrativeSource": "fallback"/);
   assert.equal(stderr.read(), '');
+  const parsed = parseTrailingJson(stdout.read());
+  assert.equal(parsed.findings.verdict.headline, 'Inconclusive');
+  assert.equal(parsed.narrative.source, 'fallback');
+});
+
+test('report --format markdown prints the raw markdown to stdout', async () => {
+  const stdout = createWritableCapture();
+  const stderr = createWritableCapture();
+
+  const exitCode = await runCli(['report', './fixtures/sample-syn.pcap', '--format', 'markdown'], {
+    stdout: stdout.stream,
+    stderr: stderr.stream,
+    ...createReportFixtureDeps(),
+  });
+
+  assert.equal(exitCode, 0);
+  assert.equal(stderr.read(), '');
+  assert.match(stdout.read(), /# Inconclusive\n\nsample markdown report/);
+});
+
+test('report --format html prints the raw HTML to stdout', async () => {
+  const stdout = createWritableCapture();
+  const stderr = createWritableCapture();
+
+  const exitCode = await runCli(['report', './fixtures/sample-syn.pcap', '--format', 'html'], {
+    stdout: stdout.stream,
+    stderr: stderr.stream,
+    ...createReportFixtureDeps(),
+  });
+
+  assert.equal(exitCode, 0);
+  assert.match(stdout.read(), /<!doctype html>/i);
+});
+
+test('report rejects an unknown --format value', async () => {
+  const stdout = createWritableCapture();
+  const stderr = createWritableCapture();
+
+  const exitCode = await runCli(['report', './fixtures/sample-syn.pcap', '--format', 'yaml'], {
+    stdout: stdout.stream,
+    stderr: stderr.stream,
+    ...createReportFixtureDeps(),
+  });
+
+  assert.equal(exitCode, 1);
+  assert.match(stderr.read(), /--format must be one of: json, markdown, html/);
+});
+
+test('report --output writes the selected format to a file and prints a JSON summary', async () => {
+  const stdout = createWritableCapture();
+  const stderr = createWritableCapture();
+  let wroteFile = null;
+
+  const exitCode = await runCli(['report', './fixtures/sample-syn.pcap', '--format', 'html', '--output', './tmp/netdoctor-report.html'], {
+    stdout: stdout.stream,
+    stderr: stderr.stream,
+    ...createReportFixtureDeps({
+      writeFile: async (filePath, content) => {
+        wroteFile = { filePath, content };
+      },
+    }),
+  });
+
+  assert.equal(exitCode, 0);
+  assert.equal(stderr.read(), '');
+  const summary = parseTrailingJson(stdout.read());
+  assert.match(summary.outputPath, /netdoctor-report\.html$/);
+  assert.equal(summary.narrativeSource, 'fallback');
+  assert.equal(summary.verdict, 'Inconclusive');
   assert.equal(wroteFile.filePath.endsWith('/tmp/netdoctor-report.html'), true);
-  assert.match(wroteFile.html, /<!doctype html>/i);
+  assert.match(wroteFile.content, /<!doctype html>/i);
+});
+
+test('report --to delivers by email and prints a JSON summary with delivery info', async () => {
+  const stdout = createWritableCapture();
+  const stderr = createWritableCapture();
+  let deliverCall = null;
+
+  const exitCode = await runCli(['report', './fixtures/sample-syn.pcap', '--to', 'tester@example.com', '--pdf'], {
+    stdout: stdout.stream,
+    stderr: stderr.stream,
+    ...createReportFixtureDeps({
+      deliverEmail: async (options) => {
+        deliverCall = options;
+        return {
+          subject: 'e3d netdoctor report: Inconclusive (2026-07-05)',
+          from: 'e3d netdoctor <support@e3d.ai>',
+          includePdf: true,
+          accepted: ['tester@example.com'],
+          rejected: [],
+          messageId: '<report-cli@example.com>',
+        };
+      },
+    }),
+  });
+
+  assert.equal(exitCode, 0);
+  assert.equal(stderr.read(), '');
+  assert.equal(deliverCall.to, 'tester@example.com');
+  assert.equal(deliverCall.includePdf, true);
+  const summary = parseTrailingJson(stdout.read());
+  assert.equal(summary.recipient, 'tester@example.com');
+  assert.equal(summary.messageId, '<report-cli@example.com>');
+  assert.equal(summary.outputPath, null);
+});
+
+test('report --output and --to can combine in one run', async () => {
+  const stdout = createWritableCapture();
+  const stderr = createWritableCapture();
+  let wroteFile = null;
+  let deliverCall = null;
+
+  const exitCode = await runCli(['report', './fixtures/sample-syn.pcap', '--output', './tmp/netdoctor-report.json', '--to', 'tester@example.com'], {
+    stdout: stdout.stream,
+    stderr: stderr.stream,
+    ...createReportFixtureDeps({
+      writeFile: async (filePath, content) => {
+        wroteFile = { filePath, content };
+      },
+      deliverEmail: async (options) => {
+        deliverCall = options;
+        return {
+          subject: 'subject', from: 'from', includePdf: false,
+          accepted: ['tester@example.com'], rejected: [], messageId: '<combo@example.com>',
+        };
+      },
+    }),
+  });
+
+  assert.equal(exitCode, 0);
+  assert.ok(wroteFile);
+  assert.ok(deliverCall);
+  const summary = parseTrailingJson(stdout.read());
+  assert.match(summary.outputPath, /netdoctor-report\.json$/);
+  assert.equal(summary.messageId, '<combo@example.com>');
 });
 
 test('deliver orchestrates report email delivery and surfaces sender metadata', async () => {

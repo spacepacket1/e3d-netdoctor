@@ -835,6 +835,199 @@ export function renderReportHtml({ findings, narrative }) {
   ].join('');
 }
 
+function escapeMarkdownCell(value) {
+  return String(value ?? '').replaceAll('|', '\\|').replaceAll('\n', ' ').trim();
+}
+
+function renderMarkdownTable(headers, rows) {
+  if (!rows.length) return '_No items in this section._';
+
+  const headerRow = `| ${headers.map(escapeMarkdownCell).join(' | ')} |`;
+  const dividerRow = `| ${headers.map(() => '---').join(' | ')} |`;
+  const bodyRows = rows.map((row) => `| ${row.map(escapeMarkdownCell).join(' | ')} |`);
+
+  return [headerRow, dividerRow, ...bodyRows].join('\n');
+}
+
+function renderMarkdownSection(title, narrativeText, contentMarkdown) {
+  return [`## ${title}`, '', narrativeText, '', contentMarkdown].join('\n');
+}
+
+export function renderReportMarkdown({ findings, narrative }) {
+  const bandwidthTable = renderMarkdownTable(
+    ['Conversation', 'Protocol', 'Bytes', 'Packets'],
+    findings.bandwidthHogs.map((item) => [
+      item.conversation,
+      item.protocol,
+      formatBytes(item.totalBytes),
+      formatInteger(item.packets),
+    ]),
+  );
+
+  const tcpTable = renderMarkdownTable(
+    ['Conversation', 'Retrans', 'Dup ACK', 'Zero-Window', 'RTT p95', 'RTT max'],
+    findings.tcpHealth.affectedConversations.map((item) => [
+      item.conversation,
+      formatInteger(item.retransmissions),
+      formatInteger(item.duplicateAcks),
+      formatInteger(item.zeroWindowStalls),
+      formatMilliseconds(item.rttP95Ms),
+      formatMilliseconds(item.rttMaxMs),
+    ]),
+  );
+
+  const dnsTable = renderMarkdownTable(
+    ['Conversation', 'Samples', 'Response p50', 'Response max'],
+    findings.dnsSlowness.slowConversations.map((item) => [
+      item.conversation,
+      formatInteger(item.responseSamples),
+      formatMilliseconds(item.responseP50Ms),
+      formatMilliseconds(item.responseMaxMs),
+    ]),
+  );
+
+  const rttTable = renderMarkdownTable(
+    ['Conversation', 'RTT p50', 'RTT p95', 'RTT max'],
+    findings.rttOutliers.conversations.map((item) => [
+      item.conversation,
+      formatMilliseconds(item.rttP50Ms),
+      formatMilliseconds(item.rttP95Ms),
+      formatMilliseconds(item.rttMaxMs),
+    ]),
+  );
+
+  const pingTable = renderMarkdownTable(
+    ['Target', 'Loss', 'RTT avg', 'RTT max'],
+    (findings.systemDiagnostics?.targets || [])
+      .filter((target) => target.ping?.ok)
+      .map((target) => [
+        target.host,
+        `${formatInteger(target.ping.packetLossPercent ?? 0)}%`,
+        formatMilliseconds(target.ping.rttAvgMs),
+        formatMilliseconds(target.ping.rttMaxMs),
+      ]),
+  );
+
+  const tracerouteTable = renderMarkdownTable(
+    ['Target', 'Hops', 'Timed-out Hops', 'Last Hop'],
+    (findings.systemDiagnostics?.targets || [])
+      .filter((target) => target.traceroute?.ok)
+      .map((target) => {
+        const lastHop = target.traceroute.hops[target.traceroute.hops.length - 1];
+        return [
+          target.host,
+          formatInteger(target.traceroute.hopCount),
+          formatInteger(target.traceroute.timedOutHopCount),
+          lastHop?.host || lastHop?.address || 'n/a',
+        ];
+      }),
+  );
+
+  const netstatInterfaceTable = renderMarkdownTable(
+    ['Interface', 'Input Errors', 'Output Errors', 'Collisions'],
+    (findings.systemDiagnostics?.localNetstat?.interfaces || [])
+      .filter((iface) => iface.inputErrors > 0 || iface.outputErrors > 0 || iface.collisions > 0)
+      .map((iface) => [
+        iface.name,
+        formatInteger(iface.inputErrors),
+        formatInteger(iface.outputErrors),
+        formatInteger(iface.collisions),
+      ]),
+  );
+
+  const broadcastTable = renderMarkdownTable(
+    ['Source', 'Destination', 'Protocol', 'Packets'],
+    findings.broadcastNoise.topConversations.map((item) => [
+      item.source || 'n/a',
+      item.destination || 'n/a',
+      item.protocol,
+      formatInteger(item.packets),
+    ]),
+  );
+
+  const chattyTable = renderMarkdownTable(
+    ['Device', 'Conversations', 'Packets', 'Destinations'],
+    (findings.chattyDevices.flagged.length ? findings.chattyDevices.flagged : findings.chattyDevices.topDevices).map((item) => [
+      item.device,
+      formatInteger(item.conversations),
+      formatInteger(item.packets),
+      formatInteger(item.distinctDestinations),
+    ]),
+  );
+
+  const protocolLines = findings.capture.protocolBreakdown.slice(0, 5).map((item) => (
+    `- ${item.protocol}: ${formatInteger(item.packets)} packets / ${formatBytes(item.bytes)}`
+  )).join('\n');
+
+  const warningsMarkdown = findings.capture.warnings.length
+    ? `\n**Warnings:** ${findings.capture.warnings.join(' | ')}`
+    : '';
+
+  const dnsEvidence = findings.dnsSlowness.timingSupported
+    ? `DNS conversations: ${formatInteger(findings.dnsSlowness.conversations)}. Slow-response threshold: ${formatInteger(findings.dnsSlowness.slowThresholdMs)} ms.`
+    : `DNS packets observed: ${formatInteger(findings.dnsSlowness.packets)}. No DNS query/response pairs with timing data were captured.`;
+
+  const metrics = [
+    `Packets: ${formatInteger(findings.capture.packetCount)}`,
+    `Conversations: ${formatInteger(findings.capture.conversationCount)}`,
+    `Retransmissions: ${formatInteger(findings.tcpHealth.totals.retransmissions)}`,
+    `RTT p95: ${formatMilliseconds(findings.tcpHealth.totals.rttMs?.p95Ms ?? null)}`,
+  ].join(' | ');
+
+  return [
+    `# ${findings.verdict.headline}`,
+    '',
+    findings.verdict.rationale,
+    '',
+    metrics,
+    '',
+    '## Executive Summary',
+    '',
+    narrative.executiveSummary.map((item) => `- ${item}`).join('\n'),
+    '',
+    renderMarkdownSection('Capture Overview', narrative.sections.overview, [
+      `Source: ${findings.capture.filePath || 'live capture'}`,
+      `Generated: ${findings.generatedAt}`,
+      '',
+      protocolLines,
+      warningsMarkdown,
+    ].join('\n')),
+    '',
+    renderMarkdownSection('Bandwidth Hogs', narrative.sections.bandwidthHogs, bandwidthTable),
+    '',
+    renderMarkdownSection('TCP Health', narrative.sections.tcpHealth, [
+      `Retransmissions: ${formatInteger(findings.tcpHealth.totals.retransmissions)} | `
+        + `Duplicate ACKs: ${formatInteger(findings.tcpHealth.totals.duplicateAcks)} | `
+        + `Out-of-order: ${formatInteger(findings.tcpHealth.totals.outOfOrder)} | `
+        + `Zero-window stalls: ${formatInteger(findings.tcpHealth.totals.zeroWindowStalls)}`,
+      '',
+      tcpTable,
+    ].join('\n')),
+    '',
+    renderMarkdownSection('RTT Outliers', narrative.sections.rttOutliers, rttTable),
+    '',
+    renderMarkdownSection('DNS Performance', narrative.sections.dnsSlowness, [dnsEvidence, '', dnsTable].join('\n')),
+    '',
+    renderMarkdownSection('Broadcast & Multicast Noise', narrative.sections.broadcastNoise, broadcastTable),
+    '',
+    renderMarkdownSection('Chatty Devices', narrative.sections.chattyDevices, chattyTable),
+    '',
+    renderMarkdownSection('System Diagnostics (ping/traceroute/netstat)', narrative.sections.systemDiagnostics, [
+      'Supplementary host-level checks, independent of the packet capture, used to corroborate the verdict above.',
+      '',
+      pingTable,
+      '',
+      tracerouteTable,
+      '',
+      netstatInterfaceTable,
+    ].join('\n')),
+    '',
+    '---',
+    '',
+    '_This report is based on aggregated conversation metrics only. No raw packet payload data is rendered in the report._',
+  ].join('\n');
+}
+
 export async function generateReport(parsedCapture, options = {}) {
   const findings = buildStructuredFindings(parsedCapture, options);
 
@@ -858,10 +1051,12 @@ export async function generateReport(parsedCapture, options = {}) {
 
   const narrative = validateNarrative(narrativeResult, findings);
   const html = renderReportHtml({ findings, narrative });
+  const markdown = renderReportMarkdown({ findings, narrative });
 
   return {
     findings,
     narrative,
     html,
+    markdown,
   };
 }

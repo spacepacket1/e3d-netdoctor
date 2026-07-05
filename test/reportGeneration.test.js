@@ -6,6 +6,7 @@ import {
   buildStructuredFindings,
   generateNarrativeWithClaude,
   generateReport,
+  renderReportMarkdown,
 } from '../src/reportGeneration.js';
 
 function createParsedCaptureFixture() {
@@ -279,6 +280,57 @@ test('generateNarrativeWithClaude throws a clear error on a non-JSON response, l
     () => generateNarrativeWithClaude(findings, { apiKey: 'test-key', fetchImpl }),
     /Claude narrative generation returned invalid JSON/,
   );
+});
+
+test('renderReportMarkdown renders headline, executive summary, tables, and no raw payloads', () => {
+  const findings = buildStructuredFindings(createParsedCaptureFixture(), {
+    generatedAt: '2026-07-03T21:00:00.000Z',
+  });
+  const narrative = {
+    source: 'test-double',
+    executiveSummary: ['Likely local is the leading diagnosis.', 'TCP retransmissions support the conclusion.'],
+    sections: {
+      overview: 'This summary is based on aggregated conversation metrics only.',
+      bandwidthHogs: 'One TCP conversation carries most of the observed bytes.',
+      tcpHealth: 'Retransmissions and duplicate ACKs are concentrated in one conversation.',
+      rttOutliers: 'The same conversation crosses the RTT outlier threshold.',
+      dnsSlowness: 'DNS packets are present, with per-query timing available.',
+      broadcastNoise: 'Broadcast and multicast traffic is present at a lower volume.',
+      chattyDevices: 'A single local device is responsible for most of the observed activity.',
+      systemDiagnostics: 'System diagnostics were not gathered in this test.',
+    },
+  };
+
+  const markdown = renderReportMarkdown({ findings, narrative });
+
+  assert.match(markdown, /^# Likely local/);
+  assert.match(markdown, /## Executive Summary/);
+  assert.match(markdown, /- Likely local is the leading diagnosis\./);
+  assert.match(markdown, /## Bandwidth Hogs/);
+  assert.match(markdown, /\| Conversation \| Protocol \| Bytes \| Packets \|/);
+  assert.match(markdown, /## TCP Health/);
+  assert.match(markdown, /## DNS Performance/);
+  assert.doesNotMatch(markdown, /TOP-SECRET-PAYLOAD/);
+  assert.doesNotMatch(markdown, /tcpPayload/);
+});
+
+test('generateReport returns both html and markdown renderings', async () => {
+  const report = await generateReport(createParsedCaptureFixture(), {
+    generatedAt: '2026-07-03T21:00:00.000Z',
+    systemDiagnostics: false,
+    generateNarrative: async (findings) => ({
+      source: 'test-double',
+      executiveSummary: [`${findings.verdict.headline} is the leading diagnosis.`],
+      sections: {
+        overview: 'overview', bandwidthHogs: 'bw', tcpHealth: 'tcp', rttOutliers: 'rtt',
+        dnsSlowness: 'dns', broadcastNoise: 'broadcast', chattyDevices: 'chatty', systemDiagnostics: 'diag',
+      },
+    }),
+  });
+
+  assert.match(report.html, /<!doctype html>/i);
+  assert.match(report.markdown, /^# Likely local/);
+  assert.match(report.markdown, /## Executive Summary/);
 });
 
 test('buildNarrativePrompt scopes the model input to structured findings', () => {

@@ -11,6 +11,7 @@ import {
   DEFAULT_CAPTURE_DURATION_SECONDS,
 } from './liveCapture.js';
 import { generateReport } from './reportGeneration.js';
+import { sendReportEmail } from './emailDelivery.js';
 import { generateAndDeliverReport } from './deliveryOrchestration.js';
 import { runPaidReportRequest } from './paidReportFlow.js';
 import { NETDOCTOR_REPORT_PRICE_CREDITS } from './paymentGate.js';
@@ -30,7 +31,13 @@ function usage() {
     '  preflight             Check whether tshark is installed locally.',
     '  smoke <file.pcap>     Run tshark preflight, parse a sample capture, and print rows/diagnostics.',
     `  capture [iface] [s]   Run a live tshark capture on an authorized network (default ${DEFAULT_CAPTURE_DURATION_SECONDS}s).`,
-    '  report <pcap> [html] [--no-system-diagnostics]  Generate a netdoctor HTML report from a capture.',
+    '  report <pcap> [--format json|markdown|html] [--output file] [--to email] [--pdf] [--no-system-diagnostics]',
+    '                        Generate a netdoctor report from a capture. Defaults to printing',
+    '                        {findings, narrative} JSON to stdout (agent-friendly); --format markdown',
+    '                        or html prints that instead. --output writes the selected format to a',
+    '                        file; --to emails it (always as HTML, --pdf attaches a PDF) via the',
+    '                        NETDOCTOR_SMTP_* env vars. --output/--to can combine; using either prints',
+    '                        a JSON summary instead of the raw content.',
     '  deliver <pcap> <to> [--pdf] [--no-system-diagnostics]  Generate and email a netdoctor report after analysis completes.',
     `  paid-report <to> [--pcap file | --interface iface] [--duration s] [--pdf] [--request-id id] [--no-system-diagnostics]`,
     `                [--wallet address [--credits n]]`,
@@ -198,10 +205,63 @@ async function runCapture(args, { stdout, stderr, checkTshark, captureLive }) {
   return 0;
 }
 
-async function runReport(args, { stdout, stderr, checkTshark, parseFile, buildReport, writeFile }) {
-  const noSystemDiagnostics = args.includes('--no-system-diagnostics');
-  const [filePath, outputPath] = args.filter((arg) => arg !== '--no-system-diagnostics');
-  if (!filePath) {
+const VALID_REPORT_FORMATS = ['json', 'markdown', 'html'];
+
+function parseReportArgs(args) {
+  const [filePath, ...flags] = args;
+  const parsed = {
+    filePath,
+    format: 'json',
+    outputPath: null,
+    recipient: undefined,
+    includePdf: false,
+    noSystemDiagnostics: false,
+  };
+
+  for (let i = 0; i < flags.length; i += 1) {
+    const flag = flags[i];
+    if (flag === '--format') {
+      const value = takeFlagValue(flags, i, flag);
+      if (!VALID_REPORT_FORMATS.includes(value)) {
+        throw new Error(`--format must be one of: ${VALID_REPORT_FORMATS.join(', ')}`);
+      }
+      parsed.format = value;
+      i += 1;
+      continue;
+    }
+    if (flag === '--output') {
+      parsed.outputPath = takeFlagValue(flags, i, flag);
+      i += 1;
+      continue;
+    }
+    if (flag === '--to') {
+      parsed.recipient = takeFlagValue(flags, i, flag);
+      i += 1;
+      continue;
+    }
+    if (flag === '--pdf') {
+      parsed.includePdf = true;
+      continue;
+    }
+    if (flag === '--no-system-diagnostics') {
+      parsed.noSystemDiagnostics = true;
+      continue;
+    }
+    throw new Error(`Unknown report option: ${flag}`);
+  }
+
+  return parsed;
+}
+
+function selectReportContent(report, format) {
+  if (format === 'markdown') return report.markdown;
+  if (format === 'html') return report.html;
+  return JSON.stringify({ findings: report.findings, narrative: report.narrative }, null, 2);
+}
+
+async function runReport(args, { stdout, stderr, checkTshark, parseFile, buildReport, writeFile, deliverEmail }) {
+  const options = parseReportArgs(args);
+  if (!options.filePath) {
     writeLine(stderr, 'report requires a .pcap file path');
     writeLine(stderr, usage());
     return 1;
@@ -210,24 +270,48 @@ async function runReport(args, { stdout, stderr, checkTshark, parseFile, buildRe
   const preflightCode = await runPreflight({ stdout, stderr, checkTshark });
   if (preflightCode !== 0) return preflightCode;
 
-  const resolvedPath = path.resolve(filePath);
+  const resolvedPath = path.resolve(options.filePath);
   const parsed = await parseFile(resolvedPath);
-  const report = await buildReport(parsed, noSystemDiagnostics ? { systemDiagnostics: false } : {});
+  const report = await buildReport(parsed, options.noSystemDiagnostics ? { systemDiagnostics: false } : {});
+  const content = selectReportContent(report, options.format);
 
-  if (outputPath) {
-    const resolvedOutput = path.resolve(outputPath);
-    await writeFile(resolvedOutput, report.html, 'utf8');
-    writeLine(stdout, JSON.stringify({
-      filePath: resolvedPath,
-      outputPath: resolvedOutput,
-      narrativeSource: report.narrative.source,
-      verdict: report.findings.verdict.headline,
-      confidence: report.findings.verdict.confidence,
-    }, null, 2));
+  let resolvedOutput = null;
+  if (options.outputPath) {
+    resolvedOutput = path.resolve(options.outputPath);
+    await writeFile(resolvedOutput, content, 'utf8');
+  }
+
+  let deliveryResult = null;
+  if (options.recipient) {
+    deliveryResult = await deliverEmail({
+      to: options.recipient,
+      includePdf: options.includePdf,
+      report,
+    });
+  }
+
+  if (!resolvedOutput && !deliveryResult) {
+    writeLine(stdout, content);
     return 0;
   }
 
-  writeLine(stdout, report.html);
+  writeLine(stdout, JSON.stringify({
+    filePath: resolvedPath,
+    format: options.format,
+    outputPath: resolvedOutput,
+    narrativeSource: report.narrative.source,
+    verdict: report.findings.verdict.headline,
+    confidence: report.findings.verdict.confidence,
+    ...(deliveryResult ? {
+      recipient: options.recipient,
+      subject: deliveryResult.subject,
+      from: deliveryResult.from,
+      includePdf: deliveryResult.includePdf,
+      accepted: deliveryResult.accepted,
+      rejected: deliveryResult.rejected,
+      messageId: deliveryResult.messageId,
+    } : {}),
+  }, null, 2));
   return 0;
 }
 
@@ -354,6 +438,7 @@ export async function runCli(argv = [], deps = {}) {
   const paidReportRequest = deps.paidReportRequest || ((options) => (
     runPaidReportRequest({ ...options, parseFile, captureLive, buildReport })
   ));
+  const deliverEmail = deps.deliverEmail || sendReportEmail;
   const writeFile = deps.writeFile || fs.writeFile;
   const [command, ...rest] = argv;
 
@@ -372,7 +457,7 @@ export async function runCli(argv = [], deps = {}) {
       case 'capture':
         return await runCapture(rest, { stdout, stderr, checkTshark, captureLive });
       case 'report':
-        return await runReport(rest, { stdout, stderr, checkTshark, parseFile, buildReport, writeFile });
+        return await runReport(rest, { stdout, stderr, checkTshark, parseFile, buildReport, writeFile, deliverEmail });
       case 'deliver':
         return await runDeliver(rest, { stdout, stderr, checkTshark, parseFile, orchestrateDelivery });
       case 'paid-report':
