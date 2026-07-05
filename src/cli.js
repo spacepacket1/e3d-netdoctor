@@ -40,13 +40,15 @@ function usage() {
     '                        a JSON summary instead of the raw content.',
     '  deliver <pcap> <to> [--pdf] [--no-system-diagnostics] [--speed-test]  Generate and email a netdoctor report after analysis completes.',
     `  paid-report <to> [--pcap file | --interface iface] [--duration s] [--pdf] [--request-id id] [--no-system-diagnostics] [--speed-test]`,
-    `                [--wallet address [--credits n]]`,
+    `                [--wallet address [--credits n] [--payment-method ethereum|base]]`,
     `                        Spend ${NETDOCTOR_REPORT_PRICE_CREDITS} e3d credits before report generation. With`,
     '                        --wallet, pay by connecting a wallet in the browser instead of an',
     '                        existing NETDOCTOR_PAYMENT_CREDIT_KEY: no --credits pays for exactly',
     '                        this one report (nothing saved locally); --credits n buys a reusable',
     '                        batch of n credits and saves the key at ~/.config/e3d-netdoctor/config.json',
-    '                        for future paid-report runs against the same wallet.',
+    '                        for future paid-report runs against the same wallet. --payment-method',
+    '                        chooses which chain/token to pay with: ethereum (E3D, default) or base',
+    '                        (wE3D, usually lower gas fees). Requires --wallet.',
     '',
     '  --no-system-diagnostics  Skip the supplementary ping/traceroute/netstat host checks (report/deliver/paid-report).',
     '  --speed-test             Also run a real download/upload throughput test (report/deliver/paid-report).',
@@ -71,6 +73,9 @@ function buildReportOptions({ noSystemDiagnostics, speedTest }) {
   return options;
 }
 
+const VALID_PAYMENT_METHODS = ['ethereum', 'base'];
+const DEFAULT_WALLET_PAYMENT_METHOD = 'ethereum';
+
 function parsePaidReportArgs(args) {
   const [recipient, ...flags] = args;
   const parsed = {
@@ -84,6 +89,7 @@ function parsePaidReportArgs(args) {
     requestId: undefined,
     wallet: undefined,
     credits: undefined,
+    paymentMethod: undefined,
   };
 
   for (let i = 0; i < flags.length; i += 1) {
@@ -138,11 +144,26 @@ function parsePaidReportArgs(args) {
       i += 1;
       continue;
     }
+    if (flag === '--payment-method') {
+      const value = takeFlagValue(flags, i, flag);
+      if (!VALID_PAYMENT_METHODS.includes(value)) {
+        throw new Error(`--payment-method must be one of: ${VALID_PAYMENT_METHODS.join(', ')}`);
+      }
+      parsed.paymentMethod = value;
+      i += 1;
+      continue;
+    }
     throw new Error(`Unknown paid-report option: ${flag}`);
   }
 
   if (parsed.credits !== undefined && !parsed.wallet) {
     throw new Error('--credits requires --wallet');
+  }
+  if (parsed.paymentMethod !== undefined && !parsed.wallet) {
+    throw new Error('--payment-method requires --wallet');
+  }
+  if (parsed.wallet && parsed.paymentMethod === undefined) {
+    parsed.paymentMethod = DEFAULT_WALLET_PAYMENT_METHOD;
   }
 
   return parsed;
@@ -416,6 +437,7 @@ async function runPaidReport(args, {
     requestId: options.requestId,
     wallet: options.wallet,
     credits: options.credits,
+    paymentMethod: options.paymentMethod,
     onPayUrl: (url) => {
       writeLine(stdout, `Open this URL in your browser to pay with your wallet:`);
       writeLine(stdout, url);

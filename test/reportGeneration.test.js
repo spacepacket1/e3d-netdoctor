@@ -5,6 +5,7 @@ import {
   buildNarrativePrompt,
   buildStructuredFindings,
   generateNarrativeWithClaude,
+  generateNarrativeWithOpenAI,
   generateReport,
   renderReportMarkdown,
 } from '../src/reportGeneration.js';
@@ -306,6 +307,139 @@ test('generateNarrativeWithClaude throws a clear error on a non-JSON response, l
     () => generateNarrativeWithClaude(findings, { apiKey: 'test-key', fetchImpl }),
     /Claude narrative generation returned invalid JSON/,
   );
+});
+
+test('generateNarrativeWithOpenAI falls back when no API key is configured', async () => {
+  // Same env-isolation concern as the Claude fallback test above -- clear any
+  // ambient OPENAI_API_KEY so an empty options.openaiApiKey really means "no key".
+  const previousEnvKey = process.env.OPENAI_API_KEY;
+  delete process.env.OPENAI_API_KEY;
+  try {
+    const findings = buildStructuredFindings(createParsedCaptureFixture());
+    const narrative = await generateNarrativeWithOpenAI(findings, { openaiApiKey: '' });
+    assert.equal(narrative.source, 'fallback');
+  } finally {
+    if (previousEnvKey !== undefined) process.env.OPENAI_API_KEY = previousEnvKey;
+  }
+});
+
+test('generateNarrativeWithOpenAI requests JSON response format and parses the result', async () => {
+  const findings = buildStructuredFindings(createParsedCaptureFixture());
+  let capturedBody = null;
+
+  const fetchImpl = async (url, options) => {
+    capturedBody = JSON.parse(options.body);
+    return {
+      ok: true,
+      text: async () => '',
+      json: async () => ({
+        choices: [{
+          finish_reason: 'stop',
+          message: { content: '{"executiveSummary":["a","b","c"],"sections":{"overview":"o"}}' },
+        }],
+      }),
+    };
+  };
+
+  const narrative = await generateNarrativeWithOpenAI(findings, { openaiApiKey: 'test-key', fetchImpl });
+
+  assert.deepEqual(capturedBody.response_format, { type: 'json_object' });
+  assert.equal(narrative.source, 'openai');
+  assert.deepEqual(narrative.executiveSummary, ['a', 'b', 'c']);
+  assert.equal(narrative.sections.overview, 'o');
+});
+
+test('generateNarrativeWithOpenAI throws a clear error when the response was truncated', async () => {
+  const findings = buildStructuredFindings(createParsedCaptureFixture());
+  const fetchImpl = async () => ({
+    ok: true,
+    text: async () => '',
+    json: async () => ({
+      choices: [{ finish_reason: 'length', message: { content: '{"executiveSummary":["a"' } }],
+    }),
+  });
+
+  await assert.rejects(
+    () => generateNarrativeWithOpenAI(findings, { openaiApiKey: 'test-key', fetchImpl }),
+    /truncated \(hit the token limit/,
+  );
+});
+
+test('generateNarrativeWithOpenAI throws a clear error on a non-JSON response', async () => {
+  const findings = buildStructuredFindings(createParsedCaptureFixture());
+  const fetchImpl = async () => ({
+    ok: true,
+    text: async () => '',
+    json: async () => ({ choices: [{ finish_reason: 'stop', message: { content: 'not json at all' } }] }),
+  });
+
+  await assert.rejects(
+    () => generateNarrativeWithOpenAI(findings, { openaiApiKey: 'test-key', fetchImpl }),
+    /OpenAI narrative generation returned invalid JSON/,
+  );
+});
+
+test('generateReport prefers Anthropic over OpenAI when both keys are present', async () => {
+  const previousAnthropicKey = process.env.ANTHROPIC_API_KEY;
+  const previousOpenaiKey = process.env.OPENAI_API_KEY;
+  process.env.ANTHROPIC_API_KEY = 'anthropic-test-key';
+  process.env.OPENAI_API_KEY = 'openai-test-key';
+  try {
+    const calledUrls = [];
+    const fetchImpl = async (url) => {
+      calledUrls.push(url);
+      return {
+        ok: true,
+        text: async () => '',
+        json: async () => ({
+          content: [{ type: 'text', text: '{"executiveSummary":["ok"],"sections":{}}' }],
+        }),
+      };
+    };
+
+    await generateReport(createParsedCaptureFixture(), {
+      generatedAt: '2026-07-03T21:00:00.000Z',
+      systemDiagnostics: false,
+      fetchImpl,
+    });
+
+    assert.deepEqual(calledUrls, ['https://api.anthropic.com/v1/messages']);
+  } finally {
+    if (previousAnthropicKey !== undefined) process.env.ANTHROPIC_API_KEY = previousAnthropicKey; else delete process.env.ANTHROPIC_API_KEY;
+    if (previousOpenaiKey !== undefined) process.env.OPENAI_API_KEY = previousOpenaiKey; else delete process.env.OPENAI_API_KEY;
+  }
+});
+
+test('generateReport uses OpenAI when only an OpenAI key is present', async () => {
+  const previousAnthropicKey = process.env.ANTHROPIC_API_KEY;
+  const previousOpenaiKey = process.env.OPENAI_API_KEY;
+  delete process.env.ANTHROPIC_API_KEY;
+  process.env.OPENAI_API_KEY = 'openai-test-key';
+  try {
+    const calledUrls = [];
+    const fetchImpl = async (url) => {
+      calledUrls.push(url);
+      return {
+        ok: true,
+        text: async () => '',
+        json: async () => ({
+          choices: [{ finish_reason: 'stop', message: { content: '{"executiveSummary":["ok"],"sections":{}}' } }],
+        }),
+      };
+    };
+
+    const report = await generateReport(createParsedCaptureFixture(), {
+      generatedAt: '2026-07-03T21:00:00.000Z',
+      systemDiagnostics: false,
+      fetchImpl,
+    });
+
+    assert.deepEqual(calledUrls, ['https://api.openai.com/v1/chat/completions']);
+    assert.equal(report.narrative.source, 'openai');
+  } finally {
+    if (previousAnthropicKey !== undefined) process.env.ANTHROPIC_API_KEY = previousAnthropicKey;
+    if (previousOpenaiKey !== undefined) process.env.OPENAI_API_KEY = previousOpenaiKey; else delete process.env.OPENAI_API_KEY;
+  }
 });
 
 test('renderReportMarkdown renders headline, executive summary, tables, and no raw payloads', () => {

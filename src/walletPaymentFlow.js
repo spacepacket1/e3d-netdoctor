@@ -46,6 +46,7 @@ export async function resolveCreditKeyViaWallet({
   credits,
   oneOff = false,
   product = 'netdoctor',
+  paymentMethod,
   minCreditsPerReport = NETDOCTOR_REPORT_PRICE_CREDITS,
   paymentClient,
   walletCredentials = { load: loadWalletCredentials, save: saveWalletCredentials },
@@ -72,7 +73,7 @@ export async function resolveCreditKeyViaWallet({
     ? minCreditsPerReport
     : Math.max(Number(credits) || 0, minCreditsPerReport);
 
-  const session = await paymentClient.createPaymentSession({ product, wallet, requestedIssuedCredits });
+  const session = await paymentClient.createPaymentSession({ product, wallet, requestedIssuedCredits, paymentMethod });
   const payUrl = buildUrl({ sessionId: session.sessionId });
   if (onPayUrl) onPayUrl(payUrl, session.quote);
 

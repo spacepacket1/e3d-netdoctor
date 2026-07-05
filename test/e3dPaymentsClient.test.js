@@ -68,6 +68,22 @@ test('createPaymentSession posts to the session endpoint without requiring a tok
   }
 });
 
+test('createPaymentSession includes paymentMethod in the body when provided', async () => {
+  let capturedBody = null;
+  const restore = stubFetch(async (url, options) => {
+    capturedBody = JSON.parse(options.body);
+    return jsonResponse({ sessionId: 'abc123', quote: { requiredBaseCredits: 500 } }, { status: 201 });
+  });
+
+  try {
+    const client = new E3DPaymentsClient({});
+    await client.createPaymentSession({ product: 'netdoctor', wallet: '0x1', requestedIssuedCredits: 500, paymentMethod: 'ethereum' });
+    assert.equal(capturedBody.paymentMethod, 'ethereum');
+  } finally {
+    restore();
+  }
+});
+
 test('getSessionResult GETs the result endpoint for the given session id', async () => {
   let capturedUrl = null;
   let capturedMethod = null;

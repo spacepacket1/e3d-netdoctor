@@ -1,6 +1,7 @@
 import { gatherSystemDiagnostics } from './systemDiagnostics.js';
 
 const DEFAULT_ANTHROPIC_MODEL = process.env.NETDOCTOR_ANTHROPIC_MODEL || 'claude-sonnet-5';
+const DEFAULT_OPENAI_MODEL = process.env.NETDOCTOR_OPENAI_MODEL || 'gpt-4o';
 const DEFAULT_EXECUTIVE_SUMMARY_LIMIT = 5;
 
 function toNumber(value) {
@@ -619,6 +620,61 @@ export async function generateNarrativeWithClaude(findings, options = {}) {
   return validateNarrative({ ...parsedJson, source: 'claude' }, findings);
 }
 
+export async function generateNarrativeWithOpenAI(findings, options = {}) {
+  const apiKey = options.openaiApiKey || process.env.OPENAI_API_KEY;
+  if (!apiKey) return createFallbackNarrative(findings);
+
+  const model = options.openaiModel || DEFAULT_OPENAI_MODEL;
+  const prompt = buildNarrativePrompt(findings);
+  const fetchImpl = options.fetchImpl || fetch;
+  const response = await fetchImpl('https://api.openai.com/v1/chat/completions', {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      authorization: `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify({
+      model,
+      max_tokens: 4096,
+      response_format: { type: 'json_object' },
+      messages: [
+        {
+          role: 'user',
+          content: prompt,
+        },
+      ],
+    }),
+  });
+
+  if (!response.ok) {
+    const message = await response.text();
+    throw new Error(`OpenAI narrative generation failed: ${response.status} ${message}`);
+  }
+
+  const responseJson = await response.json();
+  const choice = responseJson?.choices?.[0];
+  const text = choice?.message?.content;
+  if (!text) throw new Error('OpenAI narrative generation returned no text content');
+  if (choice?.finish_reason === 'length') {
+    throw new Error('OpenAI narrative generation was truncated (hit the token limit before finishing); raise max_tokens or shorten the findings payload');
+  }
+
+  let parsedJson;
+  try {
+    parsedJson = JSON.parse(stripJsonCodeFence(text));
+  } catch (error) {
+    throw new Error(`OpenAI narrative generation returned invalid JSON: ${error.message}`);
+  }
+
+  return validateNarrative({ ...parsedJson, source: 'openai' }, findings);
+}
+
+function resolveNarrativeGenerator(options) {
+  if (options.apiKey || process.env.ANTHROPIC_API_KEY) return generateNarrativeWithClaude;
+  if (options.openaiApiKey || process.env.OPENAI_API_KEY) return generateNarrativeWithOpenAI;
+  return (findingsArg) => createFallbackNarrative(findingsArg);
+}
+
 function renderMetricPills(findings) {
   const items = [
     `Packets: ${formatInteger(findings.capture.packetCount)}`,
@@ -1069,7 +1125,7 @@ export async function generateReport(parsedCapture, options = {}) {
     findings.systemDiagnostics = await gatherDiagnostics(findings, options);
   }
 
-  const narrativeGenerator = options.generateNarrative || generateNarrativeWithClaude;
+  const narrativeGenerator = options.generateNarrative || resolveNarrativeGenerator(options);
   let narrativeResult;
   try {
     narrativeResult = await narrativeGenerator(findings, options);

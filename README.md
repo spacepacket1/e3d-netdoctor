@@ -88,8 +88,9 @@ by hand. netdoctor does, every time, and shows its work.
 ## Paying for a report
 
 `paid-report` (and the `--wallet` flag) run the same capture → verdict → report
-pipeline above, gated behind one payment of **500 e3d credits (0.5 wE3D at the
-current unit price)**. There are two ways to pay, aimed at two different users:
+pipeline above, gated behind one payment of **500 e3d credits (0.5 E3D or wE3D at
+the current unit price, depending on payment method)**. There are two ways to
+pay, aimed at two different users:
 
 - **A pre-provisioned credit key** (`NETDOCTOR_PAYMENT_CREDIT_KEY`) — for
   automation, CI, or anyone who already has an e3d account funded ahead of time.
@@ -102,8 +103,8 @@ current unit price)**. There are two ways to pay, aimed at two different users:
   ```
 
   netdoctor prints a one-time URL; open it, connect MetaMask, and approve a single
-  wE3D transfer. netdoctor polls in the background and picks up automatically once
-  the payment is confirmed — nothing to copy/paste back into the terminal.
+  token transfer. netdoctor polls in the background and picks up automatically
+  once the payment is confirmed — nothing to copy/paste back into the terminal.
 
   The benefit over the credit-key path isn't just convenience: **your wallet's
   private key never touches netdoctor or any e3d server.** The browser talks
@@ -112,7 +113,15 @@ current unit price)**. There are two ways to pay, aimed at two different users:
   manually handle a tx hash or credit key either; the whole exchange happens over
   a short-lived, single-use payment session it polls for you.
 
-  Two spending modes:
+  `--payment-method` picks which chain/token to pay with:
+  - **`ethereum`** (default) — pay with **E3D** on Ethereum mainnet.
+  - **`base`** — pay with **wE3D** on Base; usually lower gas fees.
+
+  ```bash
+  e3d-netdoctor paid-report you@example.com --interface en0 --wallet 0xYourAddress --payment-method base
+  ```
+
+  Two spending modes (independent of which chain you pick):
   - **One-off** (`--wallet <address>`, no `--credits`): pay for exactly this one
     report. Nothing is saved locally — the next `paid-report` starts a fresh
     payment.
@@ -195,7 +204,7 @@ internet access.
 
 | Purpose | Env vars |
 |---|---|
-| Narrative generation | `ANTHROPIC_API_KEY` (falls back to a deterministic template if unset) |
+| Narrative generation | `ANTHROPIC_API_KEY` (preferred if set) or `OPENAI_API_KEY` (used if Anthropic's isn't set); falls back to a deterministic template if neither is configured. Optional `NETDOCTOR_ANTHROPIC_MODEL`/`NETDOCTOR_OPENAI_MODEL` to override the default model. |
 | Email delivery | `NETDOCTOR_SMTP_HOST`, `NETDOCTOR_SMTP_PORT`, `NETDOCTOR_SMTP_SECURE`, `NETDOCTOR_SMTP_USER`, `NETDOCTOR_SMTP_PASSWORD` |
 | PDF export | `NETDOCTOR_BROWSER_PATH` (auto-detected otherwise) |
 | Payment gate | `NETDOCTOR_PAYMENT_CREDIT_KEY`, `NETDOCTOR_PAYMENT_SERVICE_KEY`, `E3D_BASE_URL` — see [`docs/payment-gate.md`](docs/payment-gate.md) |

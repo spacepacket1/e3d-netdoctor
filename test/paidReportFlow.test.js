@@ -127,6 +127,26 @@ test('runPaidReportRequest resolves a credit key via wallet before paying, in on
   assert.equal(result.payment.creditsSpent, 500);
 });
 
+test('runPaidReportRequest forwards options.paymentMethod to resolveCreditKeyViaWallet', async () => {
+  const events = [];
+
+  await runPaidReportRequest({
+    to: 'tester@example.com',
+    requestId: 'netdoctor:req-wallet-payment-method',
+    wallet: '0xWallet',
+    paymentMethod: 'ethereum',
+    resolveCreditKeyViaWallet: async ({ paymentMethod }) => {
+      events.push(`resolve:${paymentMethod}`);
+      return { creditKey: 'e3d_netdoctor_pay_eth', source: 'purchased', creditsRemaining: 0 };
+    },
+    ensurePayment: async () => ({ ok: true, requestId: 'netdoctor:req-wallet-payment-method', product: 'netdoctor', route: '/netdoctor/report', creditsSpent: 500, creditsRemaining: 0 }),
+    captureLive: async () => ({ capture: {}, parsed: { rows: [], diagnostics: { packetCount: 0, conversationCount: 0, warnings: [] } } }),
+    orchestrateDelivery: async () => createDeliveryResult(),
+  });
+
+  assert.deepEqual(events, ['resolve:ethereum']);
+});
+
 test('runPaidReportRequest treats --wallet with --credits as batch mode and records the post-spend balance', async () => {
   const events = [];
 

@@ -124,6 +124,29 @@ test('resolveCreditKeyViaWallet in batch mode purchases and persists the key', a
   assert.equal(saved.creditsRemaining, 2000);
 });
 
+test('resolveCreditKeyViaWallet forwards paymentMethod to createPaymentSession', async () => {
+  const walletCredentials = createFakeWalletCredentials();
+  const createSessionCalls = [];
+  const paymentClient = {
+    createPaymentSession: async (args) => {
+      createSessionCalls.push(args);
+      return { sessionId: 'sess-4', quote: { requiredAmount: '0.5' } };
+    },
+    getSessionResult: async () => ({ status: 'completed', creditKey: 'e3d_netdoctor_pay_eth', issuedCredits: 500 }),
+  };
+
+  await resolveCreditKeyViaWallet({
+    wallet: '0xETH',
+    oneOff: true,
+    paymentMethod: 'ethereum',
+    paymentClient,
+    walletCredentials,
+    pollOptions: { sleep: async () => {} },
+  });
+
+  assert.equal(createSessionCalls[0].paymentMethod, 'ethereum');
+});
+
 test('resolveCreditKeyViaWallet reuses a saved key with enough remaining balance, skipping session creation', async () => {
   const walletCredentials = createFakeWalletCredentials({
     '0xghi': { netdoctorCreditKey: 'e3d_netdoctor_pay_existing', creditsRemaining: 1500 },

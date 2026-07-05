@@ -39,7 +39,7 @@ export class E3DPaymentsClient {
     this.creditKey = creditKey || '';
   }
 
-  quoteCredits({ product = 'maps', wallet, requestedIssuedCredits, promotionCode } = {}) {
+  quoteCredits({ product = 'maps', wallet, requestedIssuedCredits, promotionCode, paymentMethod } = {}) {
     return requestJson(`${this.e3dBaseUrl}/api/payments/credits/quote`, {
       method: 'POST',
       headers: optionalBearer(this.token),
@@ -48,11 +48,12 @@ export class E3DPaymentsClient {
         wallet,
         requestedIssuedCredits,
         promotionCode,
+        paymentMethod,
       }),
     });
   }
 
-  purchaseCredits({ product = 'maps', wallet, txHash, promotionCode } = {}) {
+  purchaseCredits({ product = 'maps', wallet, txHash, promotionCode, paymentMethod } = {}) {
     return requestJson(`${this.e3dBaseUrl}/api/payments/credits/purchase`, {
       method: 'POST',
       headers: optionalBearer(this.token),
@@ -61,11 +62,12 @@ export class E3DPaymentsClient {
         wallet,
         txHash,
         promotionCode,
+        paymentMethod,
       }),
     });
   }
 
-  createPaymentSession({ product = 'maps', wallet, requestedIssuedCredits } = {}) {
+  createPaymentSession({ product = 'maps', wallet, requestedIssuedCredits, paymentMethod } = {}) {
     return requestJson(`${this.e3dBaseUrl}/api/payments/credits/session`, {
       method: 'POST',
       headers: optionalBearer(this.token),
@@ -73,6 +75,7 @@ export class E3DPaymentsClient {
         product,
         wallet,
         requestedIssuedCredits,
+        paymentMethod,
       }),
     });
   }

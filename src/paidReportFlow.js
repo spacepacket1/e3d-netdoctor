@@ -50,6 +50,7 @@ export async function runPaidReportRequest(options = {}) {
       wallet: options.wallet,
       credits: options.credits,
       oneOff,
+      paymentMethod: options.paymentMethod,
       paymentClient: walletPaymentClient,
       onPayUrl: options.onPayUrl,
     });

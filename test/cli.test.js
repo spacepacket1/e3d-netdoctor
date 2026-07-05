@@ -464,6 +464,7 @@ test('paid-report --wallet triggers the wallet flow, prints the pay URL, and rep
   assert.equal(exitCode, 0);
   assert.equal(receivedOptions.wallet, '0xABCDEF0000000000000000000000000000000001');
   assert.equal(receivedOptions.credits, 2000);
+  assert.equal(receivedOptions.paymentMethod, 'ethereum');
   const output = stdout.read();
   assert.match(output, /Buying 2000 e3d credits with wallet 0xABCDEF0000000000000000000000000000000001/);
   assert.match(output, /https:\/\/e3d\.ai\/pay\?session=abc123/);
@@ -523,4 +524,87 @@ test('paid-report --credits without --wallet is rejected', async () => {
 
   assert.equal(exitCode, 1);
   assert.match(stderr.read(), /--credits requires --wallet/);
+});
+
+test('paid-report --payment-method without --wallet is rejected', async () => {
+  const stdout = createWritableCapture();
+  const stderr = createWritableCapture();
+
+  const exitCode = await runCli([
+    'paid-report',
+    'tester@example.com',
+    '--payment-method',
+    'base',
+  ], {
+    stdout: stdout.stream,
+    stderr: stderr.stream,
+    checkTshark: async () => ({ installed: true, version: 'TShark 4.6.0', message: 'tshark detected' }),
+  });
+
+  assert.equal(exitCode, 1);
+  assert.match(stderr.read(), /--payment-method requires --wallet/);
+});
+
+test('paid-report --wallet --payment-method base is accepted and overrides the default', async () => {
+  const stdout = createWritableCapture();
+  const stderr = createWritableCapture();
+  let receivedOptions = null;
+
+  const exitCode = await runCli([
+    'paid-report',
+    'tester@example.com',
+    '--pcap',
+    './fixtures/sample-syn.pcap',
+    '--wallet',
+    '0xABCDEF0000000000000000000000000000000001',
+    '--payment-method',
+    'base',
+  ], {
+    stdout: stdout.stream,
+    stderr: stderr.stream,
+    checkTshark: async () => ({ installed: true, version: 'TShark 4.6.0', message: 'tshark detected' }),
+    paidReportRequest: async (options) => {
+      receivedOptions = options;
+      options.onPayUrl('https://e3d.ai/pay?session=abc456');
+      return {
+        requestId: 'netdoctor:req-wallet-base',
+        payment: { product: 'netdoctor', route: '/netdoctor/report', creditsSpent: 500, creditsRemaining: 0 },
+        capture: null,
+        report: { findings: { verdict: { headline: 'Likely local' } } },
+        delivery: {
+          subject: 'e3d netdoctor report: Likely local (2026-07-04)',
+          from: 'e3d netdoctor <support@e3d.ai>',
+          includePdf: false,
+          accepted: [options.to],
+          rejected: [],
+          messageId: '<paid-wallet-base@example.com>',
+        },
+      };
+    },
+  });
+
+  assert.equal(exitCode, 0);
+  assert.equal(receivedOptions.paymentMethod, 'base');
+  assert.equal(stderr.read(), '');
+});
+
+test('paid-report --wallet --payment-method rejects an unsupported value', async () => {
+  const stdout = createWritableCapture();
+  const stderr = createWritableCapture();
+
+  const exitCode = await runCli([
+    'paid-report',
+    'tester@example.com',
+    '--wallet',
+    '0xABCDEF0000000000000000000000000000000001',
+    '--payment-method',
+    'solana',
+  ], {
+    stdout: stdout.stream,
+    stderr: stderr.stream,
+    checkTshark: async () => ({ installed: true, version: 'TShark 4.6.0', message: 'tshark detected' }),
+  });
+
+  assert.equal(exitCode, 1);
+  assert.match(stderr.read(), /--payment-method must be one of: ethereum, base/);
 });

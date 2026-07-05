@@ -8,6 +8,16 @@ The v1 netdoctor report price is **500 e3d product-payment credits per report**.
 
 The CLI enforces this expected spend amount locally after the e3d payment API responds. If the API reports a smaller spend, including a zero-credit route, netdoctor stops instead of generating an underpaid report.
 
+## Wallet payments (`--wallet`)
+
+`paid-report --wallet <address>` pays without a pre-provisioned credit key, by
+connecting a wallet in the browser instead (see the README's "Paying for a
+report" section for the full user-facing flow). `--payment-method` selects
+which chain/token to pay with — `ethereum` (E3D on Ethereum mainnet, the
+default) or `base` (wE3D on Base). Both are backed by the same e3d
+product-payment credit system and the same 500-credit price; they only differ
+in which chain the transfer happens on and which token is required.
+
 ## Required Payment Configuration
 
 The payment client is modeled on `e3d-agent/src/e3d/payments-client.ts` and uses the e3d product-payment credit system.
