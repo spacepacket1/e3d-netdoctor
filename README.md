@@ -67,8 +67,23 @@ by hand. netdoctor does, every time, and shows its work.
 npm install                      # only local dependency: e3d-pcap
 e3d-netdoctor preflight           # confirms tshark is installed
 e3d-netdoctor smoke ./fixtures/sample-syn.pcap
-e3d-netdoctor report ./fixtures/retransmission-handshake.pcap out.html
+e3d-netdoctor report ./fixtures/retransmission-handshake.pcap
 ```
+
+`report` defaults to printing `{ findings, narrative }` as JSON to stdout —
+built for agents to consume directly, no parsing of prose required. Ask for
+markdown or HTML instead, write to a file, or email it:
+
+```bash
+e3d-netdoctor report ./fixtures/retransmission-handshake.pcap                          # JSON to stdout (default)
+e3d-netdoctor report ./fixtures/retransmission-handshake.pcap --format markdown        # markdown to stdout
+e3d-netdoctor report ./fixtures/retransmission-handshake.pcap --format html            # HTML to stdout
+e3d-netdoctor report ./fixtures/retransmission-handshake.pcap --format html --output out.html
+e3d-netdoctor report ./fixtures/retransmission-handshake.pcap --to you@example.com --pdf
+```
+
+When `--output` and/or `--to` are used, `report` prints a small JSON summary
+(verdict, confidence, output path, delivery info) instead of the raw content.
 
 Full command list:
 
@@ -76,7 +91,9 @@ Full command list:
 preflight                                  Check whether tshark is installed locally.
 smoke <file.pcap>                          Parse a capture, print rows/diagnostics.
 capture [iface] [seconds]                  Run a live tshark capture (default 30s).
-report <pcap> [out.html] [--no-system-diagnostics]
+report <pcap> [--format json|markdown|html] [--output file] [--to email] [--pdf] [--no-system-diagnostics]
+                                            Defaults to JSON on stdout; --format selects markdown/html;
+                                            --output writes to a file; --to emails it (--pdf attaches a PDF).
 deliver <pcap> <to> [--pdf] [--no-system-diagnostics]
 paid-report <to> [--pcap file | --interface iface] [--duration s] [--pdf] [--request-id id]
 ```
