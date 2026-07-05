@@ -19,6 +19,11 @@ This is not a UI product and not a general-purpose network health dashboard. The
 
 ## Product Requirements
 
+> **Superseded (post-v1):** the "Inconclusive" outcome described below was later
+> removed by explicit product decision — netdoctor now always commits to one of
+> the three concrete verdicts, with Low confidence and an honest rationale for
+> thin-data cases, instead of declining to call it. See `src/verdictScoring.js`.
+
 ### The v1 report must:
 
 - Lead with a **headline verdict**: Likely Upstream/ISP, Likely Local, Likely Destination/Path-Specific, or Inconclusive — with an explainable confidence rationale, not a bare score.
@@ -35,7 +40,7 @@ Group the retransmission/RTT-outlier signal two ways: by external destination, a
 - **Likely upstream/ISP** — signal spread across most independent, unrelated external destinations (diversity across providers/ASNs weighted higher than raw destination count), not confined to a single local device.
 - **Likely local** — signal confined to one local device across many destinations (bad wifi link, flaky NIC, cabling).
 - **Likely destination/path-specific** — signal confined to one or two destinations while most traffic is clean.
-- **Inconclusive** — not enough distinct destinations or traffic volume to make a credible call. A confident wrong call off thin data costs more trust with this audience than an honest "inconclusive."
+- ~~**Inconclusive** — not enough distinct destinations or traffic volume to make a credible call. A confident wrong call off thin data costs more trust with this audience than an honest "inconclusive."~~ *(superseded — see note above; thin-data cases now fall back to the closest of the three concrete verdicts instead.)*
 
 Confidence is shown as explainable reasoning — e.g. "Confidence: High — 7 of 8 independent destinations affected, spanning 3 different providers" — never an opaque number.
 
@@ -160,6 +165,10 @@ Extend the imported parsing pipeline to capture TCP health signals not currently
 ### Objective
 
 Implement the local/upstream/destination-specific/inconclusive verdict logic with explainable confidence, per the scoring methodology above.
+
+> **Superseded (post-v1):** the "Inconclusive" category and its acceptance
+> criterion below were removed by a later product decision — see the note in
+> Product Requirements above.
 
 ### Scope
 

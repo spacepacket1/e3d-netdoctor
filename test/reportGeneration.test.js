@@ -210,6 +210,32 @@ test('generateReport skips gathering system diagnostics when disabled', async ()
   assert.match(report.html, /System-level diagnostics \(ping, traceroute, netstat\) were not run/);
 });
 
+test('generateReport renders a Speed Test subsection only when systemDiagnostics.speedTest is present', async () => {
+  const withoutSpeedTest = await generateReport(createParsedCaptureFixture(), {
+    generatedAt: '2026-07-03T21:00:00.000Z',
+    gatherSystemDiagnostics: async () => ({ targets: [], localNetstat: { ok: true }, skippedReason: null }),
+    generateNarrative: async () => ({ executiveSummary: [], sections: {} }),
+  });
+  assert.doesNotMatch(withoutSpeedTest.html, /Bytes Transferred/);
+  assert.doesNotMatch(withoutSpeedTest.markdown, /Bytes Transferred/);
+
+  const withSpeedTest = await generateReport(createParsedCaptureFixture(), {
+    generatedAt: '2026-07-03T21:00:00.000Z',
+    speedTest: true,
+    gatherSystemDiagnostics: async () => ({
+      targets: [],
+      localNetstat: { ok: true },
+      skippedReason: null,
+      speedTest: { ok: true, downloadMbps: 250.4, uploadMbps: 30.1, downloadBytes: 10_000_000, uploadBytes: 5_000_000, downloadDurationMs: 320, uploadDurationMs: 1330 },
+    }),
+    generateNarrative: async () => ({ executiveSummary: [], sections: {} }),
+  });
+  assert.match(withSpeedTest.html, /Bytes Transferred/);
+  assert.match(withSpeedTest.html, /250\.4/);
+  assert.match(withSpeedTest.markdown, /Bytes Transferred/);
+  assert.match(withSpeedTest.markdown, /30\.1/);
+});
+
 test('generateNarrativeWithClaude falls back when no API key is configured', async () => {
   // options.apiKey falls back to process.env.ANTHROPIC_API_KEY, which may be
   // ambiently set in the shell (e.g. by the harness running this test) --

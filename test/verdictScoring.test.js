@@ -92,7 +92,7 @@ test('scoreVerdict returns likely destination/path-specific when issues stay con
   assert.match(result.rationale, /8\.8\.8\.8/);
 });
 
-test('scoreVerdict returns inconclusive when there are too few distinct destinations', () => {
+test('scoreVerdict falls back to a concrete best-guess verdict when there are too few distinct destinations', () => {
   const rows = [
     createRow({ externalIp: '8.8.8.8', retransmissions: 2, provider: 'Google', asn: '15169' }),
     createRow({ externalIp: '1.1.1.1', retransmissions: 1, provider: 'Cloudflare', asn: '13335' }),
@@ -100,14 +100,44 @@ test('scoreVerdict returns inconclusive when there are too few distinct destinat
 
   const result = scoreVerdict(rows);
 
-  assert.equal(result.verdict, 'Inconclusive');
+  assert.notEqual(result.verdict, 'Inconclusive');
+  assert.equal(result.verdict, 'Likely local');
   assert.equal(result.confidence, 'Low');
   assert.match(result.rationale, /too little traffic diversity/);
-  assert.deepEqual(result.summary, {
-    eligibleDestinations: 2,
-    eligibleConversations: 2,
-    affectedDestinations: 2,
-    affectedConversations: 2,
-    providersAffected: 2,
-  });
+  assert.match(result.rationale, /closest match is one local device/);
+  assert.equal(result.summary.eligibleDestinations, 2);
+  assert.equal(result.summary.eligibleConversations, 2);
+});
+
+test('scoreVerdict falls back to a concrete best-guess verdict when there is no retransmission/RTT signal at all', () => {
+  const rows = [
+    createRow({ externalIp: '8.8.8.8', localMac: 'aa:aa:aa:aa:aa:aa', provider: 'Google', asn: '15169' }),
+    createRow({ externalIp: '1.1.1.1', localMac: 'bb:bb:bb:bb:bb:bb', provider: 'Cloudflare', asn: '13335' }),
+    createRow({ externalIp: '9.9.9.9', localMac: 'cc:cc:cc:cc:cc:cc', provider: 'Quad9', asn: '19281' }),
+  ];
+
+  const result = scoreVerdict(rows);
+
+  assert.notEqual(result.verdict, 'Inconclusive');
+  assert.equal(result.verdict, 'Likely destination/path-specific');
+  assert.equal(result.confidence, 'Low');
+  assert.match(result.rationale, /no retransmission or RTT-outlier signal was observed/);
+  assert.match(result.rationale, /narrowest possible claim/);
+});
+
+test('scoreVerdict falls back to a concrete best-guess verdict when signal is spread but ties every classifier', () => {
+  const rows = [
+    createRow({ externalIp: '8.8.8.8', retransmissions: 1, localMac: 'aa:aa:aa:aa:aa:aa' }),
+    createRow({ externalIp: '1.1.1.1', retransmissions: 1, localMac: 'bb:bb:bb:bb:bb:bb' }),
+    createRow({ externalIp: '9.9.9.9', retransmissions: 1, localMac: 'cc:cc:cc:cc:cc:cc' }),
+    createRow({ externalIp: '208.67.222.222', retransmissions: 1, localMac: 'dd:dd:dd:dd:dd:dd' }),
+  ];
+
+  const result = scoreVerdict(rows);
+
+  assert.notEqual(result.verdict, 'Inconclusive');
+  assert.equal(result.verdict, 'Likely upstream/ISP');
+  assert.equal(result.confidence, 'Low');
+  assert.match(result.rationale, /signal is mixed across destinations and local devices/);
+  assert.match(result.rationale, /closest match is signal spread across 4 destinations/);
 });

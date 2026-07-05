@@ -6,6 +6,11 @@ export const DEFAULT_TRACEROUTE_MAX_HOPS = 12;
 export const DEFAULT_TRACEROUTE_TIMEOUT_MS = 15_000;
 export const DEFAULT_NETSTAT_TIMEOUT_MS = 5_000;
 export const DEFAULT_SYSTEM_DIAGNOSTICS_TARGET_LIMIT = 2;
+export const DEFAULT_SPEED_TEST_DOWNLOAD_URL = 'https://speed.cloudflare.com/__down';
+export const DEFAULT_SPEED_TEST_UPLOAD_URL = 'https://speed.cloudflare.com/__up';
+export const DEFAULT_SPEED_TEST_DOWNLOAD_BYTES = 10_000_000;
+export const DEFAULT_SPEED_TEST_UPLOAD_BYTES = 5_000_000;
+export const DEFAULT_SPEED_TEST_TIMEOUT_MS = 15_000;
 
 function runCommand(command, args, { timeoutMs, spawnImpl = spawn } = {}) {
   return new Promise((resolve) => {
@@ -192,6 +197,93 @@ export async function runNetstat(opts = {}) {
   };
 }
 
+function computeMbps(bytes, durationMs) {
+  if (!Number.isFinite(bytes) || !Number.isFinite(durationMs) || durationMs <= 0) return null;
+  const megabits = (bytes * 8) / 1_000_000;
+  const seconds = durationMs / 1000;
+  return Number((megabits / seconds).toFixed(2));
+}
+
+async function drainBody(response) {
+  if (!response.body) return;
+  const reader = response.body.getReader();
+  for (;;) {
+    const { done } = await reader.read();
+    if (done) break;
+  }
+}
+
+async function measureDownload(url, timeoutMs, fetchImpl) {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+  const start = Date.now();
+  try {
+    const response = await fetchImpl(url, { signal: controller.signal });
+    if (!response.ok) throw new Error(`speed test download failed with status ${response.status}`);
+
+    let bytesReceived = 0;
+    const reader = response.body.getReader();
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      bytesReceived += value.byteLength;
+    }
+    return { bytes: bytesReceived, durationMs: Date.now() - start };
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
+async function measureUpload(url, uploadBytes, timeoutMs, fetchImpl) {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+  const start = Date.now();
+  try {
+    const response = await fetchImpl(url, {
+      method: 'POST',
+      body: new Uint8Array(uploadBytes),
+      signal: controller.signal,
+    });
+    if (!response.ok) throw new Error(`speed test upload failed with status ${response.status}`);
+    await drainBody(response);
+    return { bytes: uploadBytes, durationMs: Date.now() - start };
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
+export async function runSpeedTest(opts = {}) {
+  const fetchImpl = opts.fetchImpl || globalThis.fetch;
+  if (typeof fetchImpl !== 'function') {
+    return { ok: false, error: 'fetch is not available in this runtime.' };
+  }
+
+  const downloadUrl = opts.downloadUrl || DEFAULT_SPEED_TEST_DOWNLOAD_URL;
+  const uploadUrl = opts.uploadUrl || DEFAULT_SPEED_TEST_UPLOAD_URL;
+  const downloadBytes = Number.isFinite(opts.downloadBytes) ? opts.downloadBytes : DEFAULT_SPEED_TEST_DOWNLOAD_BYTES;
+  const uploadBytes = Number.isFinite(opts.uploadBytes) ? opts.uploadBytes : DEFAULT_SPEED_TEST_UPLOAD_BYTES;
+  const timeoutMs = Number.isFinite(opts.timeoutMs) ? opts.timeoutMs : DEFAULT_SPEED_TEST_TIMEOUT_MS;
+
+  try {
+    const download = await measureDownload(`${downloadUrl}?bytes=${downloadBytes}`, timeoutMs, fetchImpl);
+    const upload = await measureUpload(uploadUrl, uploadBytes, timeoutMs, fetchImpl);
+
+    return {
+      ok: true,
+      error: null,
+      downloadBytes: download.bytes,
+      downloadDurationMs: download.durationMs,
+      downloadMbps: computeMbps(download.bytes, download.durationMs),
+      uploadBytes: upload.bytes,
+      uploadDurationMs: upload.durationMs,
+      uploadMbps: computeMbps(upload.bytes, upload.durationMs),
+    };
+  } catch (error) {
+    const message = error?.name === 'AbortError' ? `speed test timed out after ${timeoutMs} ms.` : String(error?.message || error);
+    return { ok: false, error: message };
+  }
+}
+
 function pickDiagnosticTargets(findings, limit) {
   const candidates = [
     ...(findings?.tcpHealth?.affectedConversations || []),
@@ -215,24 +307,30 @@ export async function gatherSystemDiagnostics(findings, options = {}) {
   const runPingImpl = options.runPing || runPing;
   const runTracerouteImpl = options.runTraceroute || runTraceroute;
   const runNetstatImpl = options.runNetstat || runNetstat;
+  const runSpeedTestImpl = options.runSpeedTest || runSpeedTest;
   const targetLimit = Number.isInteger(options.systemDiagnosticsTargetLimit)
     ? options.systemDiagnosticsTargetLimit
     : DEFAULT_SYSTEM_DIAGNOSTICS_TARGET_LIMIT;
 
   const targetHosts = pickDiagnosticTargets(findings, targetLimit);
 
-  const [targets, localNetstat] = await Promise.all([
+  const [targets, localNetstat, speedTest] = await Promise.all([
     Promise.all(targetHosts.map(async (host) => ({
       host,
       ping: await runPingImpl(host, options.pingOptions),
       traceroute: await runTracerouteImpl(host, options.tracerouteOptions),
     }))),
     runNetstatImpl(options.netstatOptions),
+    options.speedTest === true ? runSpeedTestImpl(options.speedTestOptions) : Promise.resolve(null),
   ]);
 
-  return {
+  const result = {
     targets,
     localNetstat,
     skippedReason: targetHosts.length ? null : 'No affected destination was available to target with ping/traceroute.',
   };
+  if (options.speedTest === true) {
+    result.speedTest = speedTest;
+  }
+  return result;
 }

@@ -6,8 +6,18 @@ import {
   gatherSystemDiagnostics,
   runNetstat,
   runPing,
+  runSpeedTest,
   runTraceroute,
 } from '../src/systemDiagnostics.js';
+
+function createStreamedResponse(byteLength) {
+  return new Response(new ReadableStream({
+    start(controller) {
+      controller.enqueue(new Uint8Array(byteLength));
+      controller.close();
+    },
+  }), { status: 200 });
+}
 
 function createSpawnStub(handlers = {}) {
   return function spawnStub(...args) {
@@ -136,6 +146,75 @@ test('runNetstat parses protocol stats and skips blank-address interface rows co
   assert.equal(lo0.inputErrors, 0);
   assert.equal(en0.inputErrors, 200);
   assert.equal(en0.inputPackets, 64561164);
+});
+
+test('runSpeedTest measures download and upload throughput via a mocked fetch', async () => {
+  const requests = [];
+  const fetchImpl = async (url, options = {}) => {
+    requests.push({ url, method: options.method || 'GET' });
+    if ((options.method || 'GET') === 'POST') {
+      return createStreamedResponse(0);
+    }
+    return createStreamedResponse(1_000_000);
+  };
+
+  const result = await runSpeedTest({ fetchImpl, downloadBytes: 1_000_000, uploadBytes: 500_000 });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.error, null);
+  assert.equal(result.downloadBytes, 1_000_000);
+  assert.equal(result.uploadBytes, 500_000);
+  assert.ok(result.downloadMbps === null || Number.isFinite(result.downloadMbps));
+  assert.ok(result.uploadMbps === null || Number.isFinite(result.uploadMbps));
+  assert.match(requests[0].url, /bytes=1000000/);
+  assert.equal(requests[1].method, 'POST');
+});
+
+test('runSpeedTest reports a clear error when the request times out', async () => {
+  const fetchImpl = (url, options = {}) => new Promise((resolve, reject) => {
+    options.signal?.addEventListener('abort', () => {
+      const error = new Error('The operation was aborted');
+      error.name = 'AbortError';
+      reject(error);
+    });
+  });
+
+  const result = await runSpeedTest({ fetchImpl, timeoutMs: 20 });
+
+  assert.equal(result.ok, false);
+  assert.match(result.error, /timed out after 20 ms/);
+});
+
+test('runSpeedTest reports a clear error on a network failure', async () => {
+  const fetchImpl = async () => {
+    throw new Error('getaddrinfo ENOTFOUND speed.cloudflare.com');
+  };
+
+  const result = await runSpeedTest({ fetchImpl });
+
+  assert.equal(result.ok, false);
+  assert.match(result.error, /ENOTFOUND/);
+});
+
+test('gatherSystemDiagnostics omits the speed test by default and runs it only when requested', async () => {
+  let speedTestCalled = false;
+  const baseOptions = {
+    runPing: async () => ({ ok: true }),
+    runTraceroute: async () => ({ ok: true }),
+    runNetstat: async () => ({ ok: true }),
+    runSpeedTest: async () => {
+      speedTestCalled = true;
+      return { ok: true, downloadMbps: 100, uploadMbps: 20 };
+    },
+  };
+
+  const withoutFlag = await gatherSystemDiagnostics({}, baseOptions);
+  assert.equal(speedTestCalled, false);
+  assert.equal('speedTest' in withoutFlag, false);
+
+  const withFlag = await gatherSystemDiagnostics({}, { ...baseOptions, speedTest: true });
+  assert.equal(speedTestCalled, true);
+  assert.equal(withFlag.speedTest.downloadMbps, 100);
 });
 
 test('gatherSystemDiagnostics targets the top affected destinations and reports when none are available', async () => {

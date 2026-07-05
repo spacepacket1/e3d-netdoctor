@@ -2,7 +2,7 @@ Implement e3d-netdoctor per the phased spec at `docs/netdoctor-spec.md` in this 
 
 ## What this is
 
-e3d-netdoctor is a one-shot, agentic, no-UI tool: point it at a network, get told why it's slow. It captures traffic with `tshark`, scores a confidence-rated verdict (Likely Upstream/ISP vs. Likely Local vs. Likely Destination-Specific vs. Inconclusive), writes a plain-English report, and delivers it by email — gated behind an e3d pay-per-report payment. Read the spec's Summary, Product Requirements, and Non-Goals sections in full before writing any code; they explain what's deliberately excluded and why (no UI, no continuous monitoring yet, no security/plaintext-protocol pass yet).
+e3d-netdoctor is a one-shot, agentic, no-UI tool: point it at a network, get told why it's slow. It captures traffic with `tshark`, scores a confidence-rated verdict (Likely Upstream/ISP vs. Likely Local vs. Likely Destination-Specific — the original v1 prompt below also included an Inconclusive category, later removed by product decision so the verdict always commits to one of the three), writes a plain-English report, and delivers it by email — gated behind an e3d pay-per-report payment. Read the spec's Summary, Product Requirements, and Non-Goals sections in full before writing any code; they explain what's deliberately excluded and why (no UI, no continuous monitoring yet, no security/plaintext-protocol pass yet).
 
 ## How to work
 

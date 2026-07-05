@@ -31,15 +31,15 @@ function usage() {
     '  preflight             Check whether tshark is installed locally.',
     '  smoke <file.pcap>     Run tshark preflight, parse a sample capture, and print rows/diagnostics.',
     `  capture [iface] [s]   Run a live tshark capture on an authorized network (default ${DEFAULT_CAPTURE_DURATION_SECONDS}s).`,
-    '  report <pcap> [--format json|markdown|html] [--output file] [--to email] [--pdf] [--no-system-diagnostics]',
+    '  report <pcap> [--format json|markdown|html] [--output file] [--to email] [--pdf] [--no-system-diagnostics] [--speed-test]',
     '                        Generate a netdoctor report from a capture. Defaults to printing',
     '                        {findings, narrative} JSON to stdout (agent-friendly); --format markdown',
     '                        or html prints that instead. --output writes the selected format to a',
     '                        file; --to emails it (always as HTML, --pdf attaches a PDF) via the',
     '                        NETDOCTOR_SMTP_* env vars. --output/--to can combine; using either prints',
     '                        a JSON summary instead of the raw content.',
-    '  deliver <pcap> <to> [--pdf] [--no-system-diagnostics]  Generate and email a netdoctor report after analysis completes.',
-    `  paid-report <to> [--pcap file | --interface iface] [--duration s] [--pdf] [--request-id id] [--no-system-diagnostics]`,
+    '  deliver <pcap> <to> [--pdf] [--no-system-diagnostics] [--speed-test]  Generate and email a netdoctor report after analysis completes.',
+    `  paid-report <to> [--pcap file | --interface iface] [--duration s] [--pdf] [--request-id id] [--no-system-diagnostics] [--speed-test]`,
     `                [--wallet address [--credits n]]`,
     `                        Spend ${NETDOCTOR_REPORT_PRICE_CREDITS} e3d credits before report generation. With`,
     '                        --wallet, pay by connecting a wallet in the browser instead of an',
@@ -49,6 +49,8 @@ function usage() {
     '                        for future paid-report runs against the same wallet.',
     '',
     '  --no-system-diagnostics  Skip the supplementary ping/traceroute/netstat host checks (report/deliver/paid-report).',
+    '  --speed-test             Also run a real download/upload throughput test (report/deliver/paid-report).',
+    '                           Uses real bandwidth and adds several seconds; off by default.',
     '',
     `Install hint: ${TSHARK_INSTALL_HINT}`,
   ].join('\n');
@@ -62,12 +64,20 @@ function takeFlagValue(args, index, flag) {
   return value;
 }
 
+function buildReportOptions({ noSystemDiagnostics, speedTest }) {
+  const options = {};
+  if (noSystemDiagnostics) options.systemDiagnostics = false;
+  if (speedTest) options.speedTest = true;
+  return options;
+}
+
 function parsePaidReportArgs(args) {
   const [recipient, ...flags] = args;
   const parsed = {
     recipient,
     includePdf: false,
     noSystemDiagnostics: false,
+    speedTest: false,
     pcapPath: null,
     interfaceName: undefined,
     durationSeconds: undefined,
@@ -84,6 +94,10 @@ function parsePaidReportArgs(args) {
     }
     if (flag === '--no-system-diagnostics') {
       parsed.noSystemDiagnostics = true;
+      continue;
+    }
+    if (flag === '--speed-test') {
+      parsed.speedTest = true;
       continue;
     }
     if (flag === '--pcap') {
@@ -216,6 +230,7 @@ function parseReportArgs(args) {
     recipient: undefined,
     includePdf: false,
     noSystemDiagnostics: false,
+    speedTest: false,
   };
 
   for (let i = 0; i < flags.length; i += 1) {
@@ -247,6 +262,10 @@ function parseReportArgs(args) {
       parsed.noSystemDiagnostics = true;
       continue;
     }
+    if (flag === '--speed-test') {
+      parsed.speedTest = true;
+      continue;
+    }
     throw new Error(`Unknown report option: ${flag}`);
   }
 
@@ -272,7 +291,7 @@ async function runReport(args, { stdout, stderr, checkTshark, parseFile, buildRe
 
   const resolvedPath = path.resolve(options.filePath);
   const parsed = await parseFile(resolvedPath);
-  const report = await buildReport(parsed, options.noSystemDiagnostics ? { systemDiagnostics: false } : {});
+  const report = await buildReport(parsed, buildReportOptions(options));
   const content = selectReportContent(report, options.format);
 
   let resolvedOutput = null;
@@ -322,6 +341,7 @@ function parseDeliverArgs(args) {
     recipient,
     includePdf: flags.includes('--pdf'),
     noSystemDiagnostics: flags.includes('--no-system-diagnostics'),
+    speedTest: flags.includes('--speed-test'),
   };
 }
 
@@ -332,7 +352,7 @@ async function runDeliver(args, {
   parseFile,
   orchestrateDelivery,
 }) {
-  const { filePath, recipient, includePdf, noSystemDiagnostics } = parseDeliverArgs(args);
+  const { filePath, recipient, includePdf, noSystemDiagnostics, speedTest } = parseDeliverArgs(args);
   if (!filePath || !recipient) {
     writeLine(stderr, 'deliver requires a .pcap file path and recipient email address');
     writeLine(stderr, usage());
@@ -347,7 +367,7 @@ async function runDeliver(args, {
   const result = await orchestrateDelivery(parsed, {
     to: recipient,
     includePdf,
-    reportOptions: noSystemDiagnostics ? { systemDiagnostics: false } : {},
+    reportOptions: buildReportOptions({ noSystemDiagnostics, speedTest }),
   });
 
   writeLine(stdout, JSON.stringify({
@@ -401,7 +421,7 @@ async function runPaidReport(args, {
       writeLine(stdout, url);
       writeLine(stdout, 'Waiting for payment to complete...');
     },
-    reportOptions: options.noSystemDiagnostics ? { systemDiagnostics: false } : {},
+    reportOptions: buildReportOptions(options),
   });
 
   writeLine(stdout, JSON.stringify({

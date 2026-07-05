@@ -371,7 +371,7 @@ export function buildStructuredFindings(parsedCapture, options = {}) {
       protocolBreakdown: Array.isArray(diagnostics.protocolBreakdown) ? diagnostics.protocolBreakdown : [],
     },
     verdict: {
-      headline: toText(diagnostics?.verdict?.verdict) || 'Inconclusive',
+      headline: toText(diagnostics?.verdict?.verdict) || 'Likely destination/path-specific',
       confidence: toText(diagnostics?.verdict?.confidence) || 'Low',
       rationale: toText(diagnostics?.verdict?.rationale) || 'Confidence: Low - verdict data unavailable.',
       summary: diagnostics?.verdict?.summary || {},
@@ -446,6 +446,13 @@ function describeSystemDiagnostics(findings) {
   }
   if (netstat?.protocolStatsSupported && netstat.protocolStats?.retransmitTimeouts) {
     parts.push(`The local TCP stack recorded ${formatInteger(netstat.protocolStats.retransmitTimeouts)} retransmit timeouts since counters were last reset.`);
+  }
+
+  const speedTest = diagnostics.speedTest;
+  if (speedTest) {
+    parts.push(speedTest.ok
+      ? `A speed test measured ${speedTest.downloadMbps ?? 'an unknown'} Mbps down and ${speedTest.uploadMbps ?? 'an unknown'} Mbps up.`
+      : `A speed test was attempted but did not complete (${speedTest.error || 'unknown error'}).`);
   }
 
   return parts.length ? parts.join(' ') : 'System-level diagnostics did not surface additional corroborating evidence.';
@@ -742,6 +749,18 @@ export function renderReportHtml({ findings, narrative }) {
       ]),
   );
 
+  const speedTestTable = findings.systemDiagnostics?.speedTest
+    ? renderTable(
+      ['Direction', 'Mbps', 'Bytes Transferred', 'Duration'],
+      findings.systemDiagnostics.speedTest.ok
+        ? [
+          ['Download', findings.systemDiagnostics.speedTest.downloadMbps ?? 'n/a', formatBytes(findings.systemDiagnostics.speedTest.downloadBytes), formatMilliseconds(findings.systemDiagnostics.speedTest.downloadDurationMs)],
+          ['Upload', findings.systemDiagnostics.speedTest.uploadMbps ?? 'n/a', formatBytes(findings.systemDiagnostics.speedTest.uploadBytes), formatMilliseconds(findings.systemDiagnostics.speedTest.uploadDurationMs)],
+        ]
+        : [],
+    )
+    : '';
+
   const broadcastTable = renderTable(
     ['Source', 'Destination', 'Protocol', 'Packets'],
     findings.broadcastNoise.topConversations.map((item) => [
@@ -823,6 +842,7 @@ export function renderReportHtml({ findings, narrative }) {
       pingTable,
       tracerouteTable,
       netstatInterfaceTable,
+      speedTestTable,
     ].join('')),
     '<tr><td style="padding:0 32px 32px 32px;">',
     '<p style="margin:0;font-size:12px;line-height:18px;color:#64748b;">This report is based on aggregated conversation metrics only. No raw packet payload data is rendered in the report.</p>',
@@ -935,6 +955,18 @@ export function renderReportMarkdown({ findings, narrative }) {
       ]),
   );
 
+  const speedTestTable = findings.systemDiagnostics?.speedTest
+    ? renderMarkdownTable(
+      ['Direction', 'Mbps', 'Bytes Transferred', 'Duration'],
+      findings.systemDiagnostics.speedTest.ok
+        ? [
+          ['Download', findings.systemDiagnostics.speedTest.downloadMbps ?? 'n/a', formatBytes(findings.systemDiagnostics.speedTest.downloadBytes), formatMilliseconds(findings.systemDiagnostics.speedTest.downloadDurationMs)],
+          ['Upload', findings.systemDiagnostics.speedTest.uploadMbps ?? 'n/a', formatBytes(findings.systemDiagnostics.speedTest.uploadBytes), formatMilliseconds(findings.systemDiagnostics.speedTest.uploadDurationMs)],
+        ]
+        : [],
+    )
+    : '';
+
   const broadcastTable = renderMarkdownTable(
     ['Source', 'Destination', 'Protocol', 'Packets'],
     findings.broadcastNoise.topConversations.map((item) => [
@@ -1020,6 +1052,7 @@ export function renderReportMarkdown({ findings, narrative }) {
       tracerouteTable,
       '',
       netstatInterfaceTable,
+      speedTestTable ? `\n${speedTestTable}` : '',
     ].join('\n')),
     '',
     '---',

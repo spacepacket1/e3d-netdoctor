@@ -220,20 +220,54 @@ function formatProviderCount(summary) {
   return `${count} ${count === 1 ? 'provider' : 'providers'}`;
 }
 
-function buildInconclusiveResult(summary, reason) {
+function classifyBestGuess(summary, reason) {
   const destinations = summary.eligibleDestinations.size;
   const conversations = summary.eligibleConversations;
+  const affectedDestinations = summary.affectedDestinations.size;
+  const dominantLocal = pickDominantLocal(summary);
+  const dominantLocalShare = dominantLocal && summary.totalAffectedSignal > 0
+    ? dominantLocal.signal / summary.totalAffectedSignal
+    : 0;
+
+  const baseSummary = {
+    eligibleDestinations: destinations,
+    eligibleConversations: conversations,
+    affectedDestinations,
+    affectedConversations: summary.affectedConversations,
+    providersAffected: summary.knownProvidersAffected.size,
+  };
+
+  if (dominantLocalShare >= 0.5) {
+    return {
+      verdict: 'Likely local',
+      confidence: 'Low',
+      rationale: `Confidence: Low - ${reason}; the closest match is one local device (${dominantLocal.key}) accounting for ${Math.round(dominantLocalShare * 100)}% of the affected signal (${destinations} external ${destinations === 1 ? 'destination' : 'destinations'}, ${conversations} eligible ${conversations === 1 ? 'conversation' : 'conversations'}).`,
+      summary: {
+        ...baseSummary,
+        dominantLocal: dominantLocal.key,
+        dominantLocalShare: Number(dominantLocalShare.toFixed(3)),
+      },
+    };
+  }
+
+  if (affectedDestinations >= 3) {
+    return {
+      verdict: 'Likely upstream/ISP',
+      confidence: 'Low',
+      rationale: `Confidence: Low - ${reason}; the closest match is signal spread across ${affectedDestinations} destinations (${formatProviderCount(summary)}) with no single local device dominating.`,
+      summary: {
+        ...baseSummary,
+        dominantLocal: dominantLocal?.key || null,
+        dominantLocalShare: Number(dominantLocalShare.toFixed(3)),
+      },
+    };
+  }
+
   return {
-    verdict: 'Inconclusive',
+    verdict: 'Likely destination/path-specific',
     confidence: 'Low',
-    rationale: `Confidence: Low - ${reason} (${destinations} external ${destinations === 1 ? 'destination' : 'destinations'}, ${conversations} eligible ${conversations === 1 ? 'conversation' : 'conversations'}).`,
-    summary: {
-      eligibleDestinations: destinations,
-      eligibleConversations: conversations,
-      affectedDestinations: summary.affectedDestinations.size,
-      affectedConversations: summary.affectedConversations,
-      providersAffected: summary.knownProvidersAffected.size,
-    },
+    rationale: `Confidence: Low - ${reason}; defaulting to the narrowest possible claim (${destinations} external ${destinations === 1 ? 'destination' : 'destinations'}, ${conversations} eligible ${conversations === 1 ? 'conversation' : 'conversations'}).`,
+    summary: baseSummary,
   };
 }
 
@@ -335,17 +369,17 @@ export function scoreVerdict(rows, options = {}) {
   const minConversations = Number.isFinite(options.minEligibleConversations) ? options.minEligibleConversations : 3;
 
   if (summary.eligibleConversations < minConversations || summary.eligibleDestinations.size < minDestinations) {
-    return buildInconclusiveResult(summary, 'too little traffic diversity for a credible local-vs-upstream call');
+    return classifyBestGuess(summary, 'too little traffic diversity for a credible local-vs-upstream call');
   }
 
   if (summary.affectedDestinations.size === 0) {
-    return buildInconclusiveResult(summary, 'no retransmission or RTT-outlier signal was observed');
+    return classifyBestGuess(summary, 'no retransmission or RTT-outlier signal was observed');
   }
 
   return (
     classifyLocal(summary)
     || classifyUpstream(summary)
     || classifyDestinationSpecific(summary)
-    || buildInconclusiveResult(summary, `signal is mixed across destinations and local devices (${formatProviderCount(summary)})`)
+    || classifyBestGuess(summary, `signal is mixed across destinations and local devices (${formatProviderCount(summary)})`)
   );
 }

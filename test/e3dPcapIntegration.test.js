@@ -112,7 +112,8 @@ test('retransmission fixture surfaces conversation TCP health and RTT metrics', 
       maxMs: null,
     },
   });
-  assert.equal(parsed.diagnostics.verdict.verdict, 'Inconclusive');
+  assert.notEqual(parsed.diagnostics.verdict.verdict, 'Inconclusive');
+  assert.equal(parsed.diagnostics.verdict.verdict, 'Likely local');
   assert.equal(parsed.diagnostics.verdict.confidence, 'Low');
   assert.equal(parsed.diagnostics.parserStatus.optionalFieldsEnabled, true);
 });

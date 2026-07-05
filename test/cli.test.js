@@ -193,6 +193,48 @@ test('report rejects an unknown --format value', async () => {
   assert.match(stderr.read(), /--format must be one of: json, markdown, html/);
 });
 
+test('report --speed-test passes speedTest: true through to buildReport, off by default', async () => {
+  const stdout = createWritableCapture();
+  const stderr = createWritableCapture();
+  let capturedOptions = null;
+
+  const withoutFlag = await runCli(['report', './fixtures/sample-syn.pcap'], {
+    stdout: stdout.stream,
+    stderr: stderr.stream,
+    ...createReportFixtureDeps({
+      buildReport: async (parsed, options) => {
+        capturedOptions = options;
+        return {
+          findings: { verdict: { headline: 'Inconclusive', confidence: 'Low' } },
+          narrative: { source: 'fallback' },
+          html: '<!doctype html><html><body>report</body></html>',
+          markdown: '# Inconclusive\n\nsample markdown report',
+        };
+      },
+    }),
+  });
+  assert.equal(withoutFlag, 0);
+  assert.equal(capturedOptions.speedTest, undefined);
+
+  const withFlag = await runCli(['report', './fixtures/sample-syn.pcap', '--speed-test'], {
+    stdout: stdout.stream,
+    stderr: stderr.stream,
+    ...createReportFixtureDeps({
+      buildReport: async (parsed, options) => {
+        capturedOptions = options;
+        return {
+          findings: { verdict: { headline: 'Inconclusive', confidence: 'Low' } },
+          narrative: { source: 'fallback' },
+          html: '<!doctype html><html><body>report</body></html>',
+          markdown: '# Inconclusive\n\nsample markdown report',
+        };
+      },
+    }),
+  });
+  assert.equal(withFlag, 0);
+  assert.equal(capturedOptions.speedTest, true);
+});
+
 test('report --output writes the selected format to a file and prints a JSON summary', async () => {
   const stdout = createWritableCapture();
   const stderr = createWritableCapture();
