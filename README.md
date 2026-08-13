@@ -62,9 +62,10 @@ by hand. netdoctor does, every time, and shows its work.
 ## What it actually does
 
 1. **Captures** a short live packet trace (`tshark`), or takes a `.pcap` you already have.
-2. **Extends** the parse with TCP-health signals `e3d-pcap`'s core parser doesn't
-   collect on its own: retransmissions, duplicate ACKs, out-of-order, zero-window
-   stalls, per-flow RTT (SYN→SYN-ACK), and DNS response timing.
+2. **Extends** the parse with TCP-health signals the vendored `e3d-pcap` parsing
+   core (`src/vendor/`) doesn't collect on its own: retransmissions, duplicate
+   ACKs, out-of-order, zero-window stalls, per-flow RTT (SYN→SYN-ACK), and DNS
+   response timing.
 3. **Corroborates** with host-level checks that don't depend on the capture at all —
    real `ping` and `traceroute` to the destinations the capture flagged, and `netstat`
    for local NIC error/collision counters and TCP-stack retransmit stats.
@@ -146,7 +147,7 @@ configuration and failure-mode details.
 ## Quickstart
 
 ```bash
-npm install                      # only local dependency: e3d-pcap
+npm install                      # no dependencies to install
 e3d-netdoctor preflight           # confirms tshark is installed
 e3d-netdoctor smoke ./fixtures/sample-syn.pcap
 e3d-netdoctor report ./fixtures/retransmission-handshake.pcap
@@ -235,8 +236,9 @@ Every capture/analysis entrypoint prints a reminder up front:
 
 ## No external dependencies to install
 
-Everything beyond parsing (which reuses `e3d-pcap`'s tested core) is built on
-Node's standard library and the system tools you already have:
+Everything beyond parsing (which vendors `e3d-pcap`'s tested core under
+`src/vendor/`) is built on Node's standard library and the system tools you
+already have:
 
 - **Email** — a small SMTP client on `node:net`/`node:tls` (STARTTLS + AUTH LOGIN).
   No `nodemailer`.
@@ -246,9 +248,9 @@ Node's standard library and the system tools you already have:
 - **Payment client** — a small, self-contained e3d payments client, not a runtime
   dependency on another repo.
 
-`npm install` has nothing left to resolve beyond the one intentional local
-dependency (`e3d-pcap`), and nothing to silently fail on a machine without
-internet access.
+`npm install` has nothing to resolve at all — the `e3d-pcap` parsing core is
+vendored directly under `src/vendor/`, not pulled in as a package — so there's
+nothing to silently fail on a machine without internet access.
 
 ## Configuration
 

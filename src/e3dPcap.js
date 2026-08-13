@@ -3,18 +3,18 @@ import {
   DEFAULT_PARSE_TIMEOUT_MS,
   TSHARK_INSTALL_HINT,
   aggregatePacketRecords as aggregatePacketRecordsBase,
-} from 'e3d-pcap/server/localPcapParse.js';
+} from './vendor/localPcapParse.js';
 import {
   runTsharkPacketFields,
   runTsharkPacketFieldsWithMetadata,
 } from './tsharkExtendedFields.js';
 import { scoreVerdict } from './verdictScoring.js';
 
-export { checkTsharkInstalled } from 'e3d-pcap/server/tsharkCheck.js';
+export { checkTsharkInstalled } from './vendor/tsharkCheck.js';
 export {
   createLocalPcapEnrichmentClient,
   normalizeEnrichmentResponse,
-} from 'e3d-pcap/server/localPcapEnrichment.js';
+} from './vendor/localPcapEnrichment.js';
 
 export {
   runTsharkPacketFields,

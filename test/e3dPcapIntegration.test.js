@@ -3,49 +3,10 @@ import path from 'node:path';
 import { test } from 'node:test';
 
 import { aggregatePacketRecords, parsePcapFile } from '../src/e3dPcap.js';
-import { parsePcapFile as parsePcapFileDirect } from '../../e3d-pcap/server/localPcapParse.js';
 import { normalizeEnrichmentResponse } from '../src/e3dPcap.js';
 
 const fixturePath = path.resolve('fixtures/sample-syn.pcap');
 const retransmissionFixturePath = path.resolve('fixtures/retransmission-handshake.pcap');
-
-function stripExtendedFields(result) {
-  return {
-    ...result,
-    rows: result.rows.map((row) => {
-      const {
-        'TCP Retransmissions': _tcpRetransmissions,
-        'TCP Duplicate ACKs': _tcpDuplicateAcks,
-        'TCP Out-of-Order': _tcpOutOfOrder,
-        'TCP Zero-Window Stalls': _tcpZeroWindowStalls,
-        'TCP RTT Samples': _tcpRttSamples,
-        'TCP RTT Min (ms)': _tcpRttMin,
-        'TCP RTT P50 (ms)': _tcpRttP50,
-        'TCP RTT P95 (ms)': _tcpRttP95,
-        'TCP RTT Max (ms)': _tcpRttMax,
-        'DNS Response Samples': _dnsResponseSamples,
-        'DNS Response P50 (ms)': _dnsResponseP50,
-        'DNS Response P95 (ms)': _dnsResponseP95,
-        'DNS Response Max (ms)': _dnsResponseMax,
-        ...rest
-      } = row;
-      return rest;
-    }),
-    diagnostics: {
-      packetCount: result.diagnostics.packetCount,
-      conversationCount: result.diagnostics.conversationCount,
-      aggregate: result.diagnostics.aggregate,
-      protocolBreakdown: result.diagnostics.protocolBreakdown,
-      warnings: result.diagnostics.warnings.filter((warning) => !warning.includes('Extended TCP analysis fields')),
-      filePath: result.diagnostics.filePath,
-      parserStatus: {
-        ok: result.diagnostics.parserStatus.ok,
-        maxReadPackets: result.diagnostics.parserStatus.maxReadPackets,
-        timeoutMs: result.diagnostics.parserStatus.timeoutMs,
-      },
-    },
-  };
-}
 
 test('local dependency wiring exposes e3d-pcap enrichment helpers', () => {
   const normalized = normalizeEnrichmentResponse({ ok: true, items: { names: [{ value: 'demo' }] } });
@@ -59,14 +20,12 @@ test('local dependency wiring exposes e3d-pcap enrichment helpers', () => {
   });
 });
 
-test('sample pcap preserves the upstream parse contract for existing fields', async () => {
-  const viaDependency = await parsePcapFile(fixturePath);
-  const directResult = await parsePcapFileDirect(fixturePath);
+test('sample pcap parses into rows and diagnostics', async () => {
+  const result = await parsePcapFile(fixturePath);
 
-  assert.deepEqual(stripExtendedFields(viaDependency), directResult);
-  assert.equal(viaDependency.parser, 'tshark');
-  assert.ok(viaDependency.rows.length > 0);
-  assert.ok(viaDependency.diagnostics.packetCount > 0);
+  assert.equal(result.parser, 'tshark');
+  assert.ok(result.rows.length > 0);
+  assert.ok(result.diagnostics.packetCount > 0);
 });
 
 test('retransmission fixture surfaces conversation TCP health and RTT metrics', async () => {

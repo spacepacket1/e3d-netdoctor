@@ -5,7 +5,7 @@ import {
   DEFAULT_MAX_READ_PACKETS,
   DEFAULT_PARSE_TIMEOUT_MS,
   TSHARK_INSTALL_HINT,
-} from 'e3d-pcap/server/localPcapParse.js';
+} from './vendor/localPcapParse.js';
 
 const BASE_FIELD_DEFINITIONS = [
   ['eth.src', 'ethSrc'],
