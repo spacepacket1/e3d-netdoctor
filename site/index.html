@@ -1,0 +1,310 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>e3d-netdoctor — Point it at your network. Get told why it's slow.</title>
+    <meta name="description" content="A free CLI that captures live traffic and tells you whether a slowdown is your ISP, your device, or one flaky destination — with its reasoning shown. Card-payable one-shot reports from $5.">
+    <link rel="canonical" href="https://netdoctor.e3d.ai/">
+    <meta property="og:type" content="website">
+    <meta property="og:site_name" content="e3d-netdoctor">
+    <meta property="og:title" content="e3d-netdoctor — Point it at your network. Get told why it's slow.">
+    <meta property="og:description" content="Free CLI network diagnosis with its reasoning shown, not a black-box score. $5 one-shot reports, card or E3D Token.">
+    <meta property="og:url" content="https://netdoctor.e3d.ai/">
+    <meta name="twitter:card" content="summary">
+    <meta name="twitter:title" content="e3d-netdoctor">
+    <meta name="twitter:description" content="Free CLI network diagnosis with its reasoning shown, not a black-box score.">
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%F0%9F%93%A1%3C/text%3E%3C/svg%3E">
+    <style>
+      :root {
+        --bg: #0b0f14;
+        --panel: #121822;
+        --line: #232c38;
+        --text: #e6edf3;
+        --muted: #93a1b0;
+        --accent: #5fd3c4;
+        --accent-strong: #7ee6d8;
+        --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--text);
+        font-family: var(--sans);
+        line-height: 1.55;
+      }
+      .wrap { max-width: 760px; margin: 0 auto; padding: 48px 20px 80px; }
+      h1 { font-size: 1.7rem; margin: 0 0 6px; }
+      h1 .tag { display: block; font-size: 1.05rem; color: var(--accent); font-weight: 600; margin-top: 6px; }
+      h2 { font-size: 1.15rem; margin: 40px 0 12px; border-top: 1px solid var(--line); padding-top: 28px; }
+      p { color: var(--text); }
+      p.lead { color: var(--muted); font-size: 1rem; }
+      a { color: var(--accent-strong); }
+      code { font-family: var(--mono); background: var(--panel); padding: 1px 5px; border-radius: 4px; font-size: 0.9em; }
+      pre {
+        font-family: var(--mono);
+        font-size: 0.85rem;
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 16px;
+        overflow-x: auto;
+        white-space: pre;
+      }
+      table { width: 100%; border-collapse: collapse; margin: 12px 0; font-size: 0.9rem; }
+      th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+      th { color: var(--muted); font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.04em; }
+      .callout {
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-left: 3px solid var(--accent);
+        border-radius: 6px;
+        padding: 14px 16px;
+        font-size: 0.95rem;
+        color: var(--text);
+      }
+      .packs { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; margin: 16px 0; }
+      .pack {
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 16px;
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+      }
+      .pack .name { font-weight: 700; }
+      .pack .price { font-size: 1.4rem; font-family: var(--mono); }
+      .pack .desc { color: var(--muted); font-size: 0.85rem; flex-grow: 1; }
+      button.buy {
+        background: var(--accent);
+        color: #06231f;
+        border: none;
+        border-radius: 6px;
+        padding: 10px 14px;
+        font-weight: 700;
+        font-size: 0.9rem;
+        cursor: pointer;
+      }
+      button.buy:disabled { opacity: 0.6; cursor: default; }
+      button.buy:hover:not(:disabled) { background: var(--accent-strong); }
+      #checkout-status { margin-top: 14px; font-size: 0.9rem; }
+      #checkout-status.error { color: #ff8080; }
+      #checkout-status .key-box {
+        display: flex;
+        gap: 8px;
+        align-items: center;
+        margin-top: 10px;
+      }
+      #checkout-status code.key { font-size: 0.85rem; word-break: break-all; }
+      #checkout-status button.copy {
+        background: transparent;
+        border: 1px solid var(--line);
+        color: var(--text);
+        border-radius: 5px;
+        padding: 5px 9px;
+        font-size: 0.8rem;
+        cursor: pointer;
+        white-space: nowrap;
+      }
+      footer {
+        margin-top: 56px;
+        padding-top: 20px;
+        border-top: 1px solid var(--line);
+        color: var(--muted);
+        font-size: 0.85rem;
+        display: flex;
+        justify-content: space-between;
+        flex-wrap: wrap;
+        gap: 10px;
+      }
+      footer a { color: var(--muted); }
+      .notice { color: var(--muted); font-size: 0.85rem; }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <h1>e3d-netdoctor
+        <span class="tag">Point it at your network. Get told why it's slow.</span>
+      </h1>
+      <p class="lead">
+        A one-shot, no-UI CLI that captures live traffic and figures out whether
+        your slowdown is your ISP, your own device, or one flaky destination —
+        with its reasoning shown, not a black-box score.
+      </p>
+
+      <div class="callout">
+        <strong>Free to run locally.</strong> <code>capture</code> + <code>report</code>
+        need no payment and no account. The one-shot <code>paid-report</code> command
+        — capture, analyze, and get a report in a single call, mainly built for
+        automation and agents — is <strong>$5 by card</strong>, no wallet or crypto
+        required, or payable with E3D Token if you already hold it.
+      </div>
+
+      <h2>Try it free</h2>
+      <pre>npm install -g e3d-netdoctor
+e3d-netdoctor preflight
+e3d-netdoctor capture en0 30
+e3d-netdoctor report ./capture.pcap</pre>
+      <p class="notice">
+        Full source, docs, and the <code>--card</code>/<code>--wallet</code> paid flow:
+        <a href="https://github.com/spacepacket1/e3d-netdoctor" target="_blank" rel="noreferrer">github.com/spacepacket1/e3d-netdoctor</a>
+      </p>
+
+      <h2>Why this exists</h2>
+      <p>
+        Every network engineer and Wireshark user has had this conversation:
+        “Is it my wifi, or is it Comcast again?” That question is answerable from
+        a single packet capture — <em>if</em> you know to group retransmissions
+        and RTT outliers by destination <strong>and</strong> by local device, and
+        weigh provider diversity instead of raw destination count. Most people
+        don't do that math by hand. netdoctor does, every time, and shows its work.
+      </p>
+      <table>
+        <thead><tr><th>Verdict</th><th>Means</th></tr></thead>
+        <tbody>
+          <tr><td>Likely Upstream/ISP</td><td>Signal spread across many unrelated destinations and providers — not one device</td></tr>
+          <tr><td>Likely Local</td><td>Signal concentrated on one local device (MAC) across many destinations — bad wifi, flaky NIC, bad cabling</td></tr>
+          <tr><td>Likely Destination/Path-Specific</td><td>Signal confined to one or two destinations while everything else is clean</td></tr>
+        </tbody>
+      </table>
+
+      <h2>Buy report credits</h2>
+      <p class="lead">
+        500 credits = 1 <code>paid-report</code> run. Pay with a card below, or use
+        <code>e3d-netdoctor paid-report --card</code> from the CLI directly — same
+        checkout, no browser round-trip needed.
+      </p>
+      <div class="packs" id="packs">
+        <div class="pack">
+          <div class="name">Single Report</div>
+          <div class="price">$5</div>
+          <div class="desc">500 credits — 1 report</div>
+          <button type="button" class="buy" data-pack-id="single">Buy — $5</button>
+        </div>
+        <div class="pack">
+          <div class="name">Five Reports</div>
+          <div class="price">$20</div>
+          <div class="desc">2,500 credits — 5 reports</div>
+          <button type="button" class="buy" data-pack-id="five">Buy — $20</button>
+        </div>
+        <div class="pack">
+          <div class="name">Twenty Reports</div>
+          <div class="price">$70</div>
+          <div class="desc">10,000 credits — 20 reports</div>
+          <button type="button" class="buy" data-pack-id="twenty">Buy — $70</button>
+        </div>
+      </div>
+      <div id="checkout-status"></div>
+
+      <footer>
+        <span>© 2026 FutCo LLC · AI consulting by <a href="https://applied.futco.ai" target="_blank" rel="noreferrer">Applied FutCo AI</a></span>
+        <nav>
+          <a href="https://github.com/spacepacket1/e3d-netdoctor" target="_blank" rel="noreferrer">GitHub</a>
+          &nbsp;·&nbsp;
+          <a href="mailto:support@e3d.ai">support@e3d.ai</a>
+        </nav>
+      </footer>
+    </div>
+
+    <script>
+      (function () {
+        var statusEl = document.querySelector('#checkout-status');
+
+        function escapeHtml(value) {
+          return String(value).replace(/[&<>"']/g, function (c) {
+            return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+          });
+        }
+
+        function showError(message) {
+          statusEl.className = 'error';
+          statusEl.textContent = message;
+        }
+
+        function showCreditKey(result) {
+          statusEl.className = '';
+          statusEl.innerHTML =
+            '<p><strong>Payment complete.</strong> ' + (result.issuedCredits || '').toLocaleString() +
+            ' credits issued. Set this as <code>NETDOCTOR_PAYMENT_CREDIT_KEY</code> to use them:</p>' +
+            '<div class="key-box"><code class="key" id="credit-key">' + escapeHtml(result.creditKey) + '</code>' +
+            '<button type="button" class="copy" id="copy-key">Copy</button></div>' +
+            '<p class="notice">This key is shown once — copy it now. Example: <code>export NETDOCTOR_PAYMENT_CREDIT_KEY=' +
+            escapeHtml(result.creditKey) + '</code></p>';
+          var copyBtn = document.querySelector('#copy-key');
+          if (copyBtn) {
+            copyBtn.addEventListener('click', function () {
+              navigator.clipboard.writeText(result.creditKey).then(function () {
+                copyBtn.textContent = 'Copied';
+                setTimeout(function () { copyBtn.textContent = 'Copy'; }, 1500);
+              });
+            });
+          }
+        }
+
+        function pollSessionResult(sessionId, attempt) {
+          attempt = attempt || 0;
+          fetch('/api/payments/stripe/session/' + encodeURIComponent(sessionId) + '/result')
+            .then(function (res) { return res.json().then(function (body) { return { ok: res.ok, status: res.status, body: body }; }); })
+            .then(function (r) {
+              if (r.body && r.body.status === 'completed' && r.body.creditKey) {
+                showCreditKey(r.body);
+                return;
+              }
+              if (r.body && r.body.status === 'pending' && attempt < 40) {
+                setTimeout(function () { pollSessionResult(sessionId, attempt + 1); }, 3000);
+                return;
+              }
+              if (r.body && r.body.code === 'KEY_ALREADY_CLAIMED') {
+                showError('This checkout was already completed and the credit key was already shown once. Check your original browser tab, or buy a new pack.');
+                return;
+              }
+              showError((r.body && (r.body.error || r.body.message)) || 'Could not confirm payment. If you were charged, contact support@e3d.ai with your session id: ' + sessionId);
+            })
+            .catch(function () {
+              showError('Could not reach the payment server. Refresh this page to retry.');
+            });
+        }
+
+        var params = new URLSearchParams(window.location.search);
+        var sessionId = params.get('stripe_session_id');
+        if (sessionId) {
+          statusEl.textContent = 'Confirming payment…';
+          pollSessionResult(sessionId);
+        } else if (params.get('stripe_cancelled')) {
+          statusEl.textContent = 'Checkout cancelled — no charge was made.';
+        }
+
+        document.querySelectorAll('button.buy').forEach(function (button) {
+          button.addEventListener('click', function () {
+            var packId = button.dataset.packId;
+            var original = button.textContent;
+            button.disabled = true;
+            button.textContent = 'Opening Stripe Checkout…';
+            statusEl.className = '';
+            statusEl.textContent = '';
+            fetch('/api/payments/stripe/checkout', {
+              method: 'POST',
+              headers: { 'content-type': 'application/json' },
+              body: JSON.stringify({ product: 'netdoctor', packId: packId }),
+            })
+              .then(function (res) { return res.json().then(function (body) { return { ok: res.ok, status: res.status, body: body }; }); })
+              .then(function (r) {
+                if (!r.ok || !r.body.url) {
+                  throw new Error((r.body && r.body.error) || 'Could not start checkout (HTTP ' + r.status + ')');
+                }
+                window.location.href = r.body.url;
+              })
+              .catch(function (err) {
+                button.disabled = false;
+                button.textContent = original;
+                showError(err.message || 'Could not start checkout.');
+              });
+          });
+        });
+      }());
+    </script>
+  </body>
+</html>

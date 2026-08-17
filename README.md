@@ -11,6 +11,11 @@ prose to re-parse and no UI to drive.
 
 No dashboard. No account. No continuous monitoring. Run it, get an answer, move on.
 
+**Free to run locally** (`capture` + `report`, no payment, no account). The
+one-shot `paid-report` command — capture, analyze, and get a report in a single
+call — is $5 by **credit card via Stripe** (`--card`, no crypto or wallet
+needed), or payable with E3D Token if you already hold it.
+
 ```
 $ e3d-netdoctor paid-report --interface en0 --duration 30
 
@@ -99,12 +104,24 @@ behind one payment of **500 e3d credits (0.5 E3D or wE3D at the current unit
 price, depending on payment method)**. Like `report`, it defaults to printing
 JSON to stdout — here that's the payment receipt plus `findings`/`narrative` —
 with `--format`/`--output`/`--to` working exactly the same way; email is opt-in
-via `--to`, not automatic. There are two ways to pay, aimed at two different
+via `--to`, not automatic. There are three ways to pay, aimed at three different
 users:
 
 - **A pre-provisioned credit key** (`NETDOCTOR_PAYMENT_CREDIT_KEY`) — for
   automation, CI, or anyone who already has an e3d account funded ahead of time.
   Non-interactive: no browser, no prompts, safe to run unattended on a schedule.
+- **`--card [packId]`** — for a human who'd rather not touch crypto at all:
+
+  ```bash
+  e3d-netdoctor paid-report --interface en0 --card
+  ```
+
+  Prints a Stripe Checkout URL; open it, pay with a card, and netdoctor picks up
+  automatically once the payment completes. `packId` selects the credit pack —
+  `single` (500 credits, one report, the default), `five` (2,500 credits), or
+  `twenty` (10,000 credits). Nothing is saved locally; if you buy a multi-report
+  pack, copy the printed credit key into `NETDOCTOR_PAYMENT_CREDIT_KEY` to reuse
+  it on future runs. Cannot be combined with `--wallet`.
 - **`--wallet <address>`** — for a human who wants to pay for a report directly
   with E3D Token, with no e3d account or pre-funded credit key at all:
 

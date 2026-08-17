@@ -12,6 +12,7 @@ import {
   recordWalletSpend,
   resolveCreditKeyViaWallet,
 } from './walletPaymentFlow.js';
+import { resolveCreditKeyViaCard } from './cardPaymentFlow.js';
 import { anonymizeLocalIdentifiers } from './reportRedaction.js';
 
 function applyRedaction(parsed, redact) {
@@ -50,6 +51,7 @@ export async function runPaidReportRequest(options = {}) {
   const buildReport = options.buildReport || generateReport;
 
   const usingWallet = Boolean(options.wallet);
+  const usingCard = Boolean(options.card);
   const oneOff = usingWallet && !options.credits;
   let creditKey = options.creditKey;
 
@@ -62,6 +64,15 @@ export async function runPaidReportRequest(options = {}) {
       oneOff,
       paymentMethod: options.paymentMethod,
       paymentClient: walletPaymentClient,
+      onPayUrl: options.onPayUrl,
+    });
+    creditKey = resolved.creditKey;
+  } else if (usingCard) {
+    const resolveCreditKey = options.resolveCreditKeyViaCard || resolveCreditKeyViaCard;
+    const cardPaymentClient = options.cardPaymentClient || createNetdoctorPaymentsClient(options.paymentOptions);
+    const resolved = await resolveCreditKey({
+      packId: options.cardPackId,
+      paymentClient: cardPaymentClient,
       onPayUrl: options.onPayUrl,
     });
     creditKey = resolved.creditKey;

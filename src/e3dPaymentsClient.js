@@ -87,6 +87,26 @@ export class E3DPaymentsClient {
     });
   }
 
+  createStripeCheckout({ product = 'netdoctor', packId, wallet, customerEmail } = {}) {
+    return requestJson(`${this.e3dBaseUrl}/api/payments/stripe/checkout`, {
+      method: 'POST',
+      headers: optionalBearer(this.token),
+      body: JSON.stringify({
+        product,
+        packId,
+        wallet,
+        customerEmail,
+      }),
+    });
+  }
+
+  getStripeSessionResult(sessionId) {
+    return requestJson(`${this.e3dBaseUrl}/api/payments/stripe/session/${encodeURIComponent(sessionId)}/result`, {
+      method: 'GET',
+      headers: optionalBearer(this.token),
+    });
+  }
+
   getBalance({ product = 'maps' } = {}) {
     const authToken = this.token || this.creditKey;
     const query = this.token ? `?product=${encodeURIComponent(product)}` : '';

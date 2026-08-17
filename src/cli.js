@@ -46,6 +46,7 @@ function usage() {
     `  paid-report [--pcap file | --interface iface] [--duration s] [--format json|markdown|html]`,
     `                [--output file] [--to email] [--pdf] [--request-id id] [--no-system-diagnostics] [--speed-test] [--redact]`,
     `                [--wallet address [--credits n] [--payment-method ethereum|base]]`,
+    `                [--card [packId]]`,
     `                        Spend ${NETDOCTOR_REPORT_PRICE_CREDITS} e3d credits, then generate a netdoctor report.`,
     '                        Defaults to printing JSON (payment receipt + findings/narrative) to',
     '                        stdout, same as report; --format/--output/--to work exactly like report',
@@ -56,7 +57,12 @@ function usage() {
     '                        credits and saves the key at ~/.config/e3d-netdoctor/config.json for',
     '                        future paid-report runs against the same wallet. --payment-method',
     '                        chooses which chain/token to pay with: ethereum (E3D, default) or base',
-    '                        (wE3D, usually lower gas fees). Requires --wallet.',
+    '                        (wE3D, usually lower gas fees). Requires --wallet. With --card, pay by',
+    '                        credit card via Stripe Checkout instead — no wallet or crypto required.',
+    '                        Opens a checkout URL; packId picks the credit pack (default "single", one',
+    '                        report). Nothing is saved locally; set NETDOCTOR_PAYMENT_CREDIT_KEY from',
+    '                        the printed key to reuse credits on future runs. Cannot combine with',
+    '                        --wallet.',
     '  mint <report.json> --wallet address --confirm-public [--name "..."] [--description "..."]',
     '                        Tokenize a report as an NFT (E3DNFTManager, Ethereum mainnet). Requires',
     '                        a report generated with --redact (rejects otherwise) and --confirm-public,',
@@ -121,6 +127,8 @@ function parsePaidReportArgs(args) {
     wallet: undefined,
     credits: undefined,
     paymentMethod: undefined,
+    card: false,
+    cardPackId: undefined,
   };
 
   for (let i = 0; i < flags.length; i += 1) {
@@ -207,6 +215,14 @@ function parsePaidReportArgs(args) {
       i += 1;
       continue;
     }
+    if (flag === '--card') {
+      parsed.card = true;
+      if (flags[i + 1] && !flags[i + 1].startsWith('--')) {
+        parsed.cardPackId = flags[i + 1];
+        i += 1;
+      }
+      continue;
+    }
     throw new Error(`Unknown paid-report option: ${flag}`);
   }
 
@@ -218,6 +234,9 @@ function parsePaidReportArgs(args) {
   }
   if (parsed.wallet && parsed.paymentMethod === undefined) {
     parsed.paymentMethod = DEFAULT_WALLET_PAYMENT_METHOD;
+  }
+  if (parsed.card && parsed.wallet) {
+    throw new Error('--card and --wallet cannot be used together');
   }
 
   return parsed;
@@ -506,6 +525,8 @@ async function runPaidReport(args, {
     writeLine(stdout, options.credits
       ? `Buying ${options.credits} e3d credits with wallet ${options.wallet}...`
       : 'Paying for this one report with a connected wallet...');
+  } else if (options.card) {
+    writeLine(stdout, `Paying by card (pack: ${options.cardPackId || 'single'})...`);
   }
   const result = await paidReportRequest({
     to: options.recipient,
@@ -517,9 +538,13 @@ async function runPaidReport(args, {
     wallet: options.wallet,
     credits: options.credits,
     paymentMethod: options.paymentMethod,
+    card: options.card,
+    cardPackId: options.cardPackId,
     redact: options.redact,
     onPayUrl: (url) => {
-      writeLine(stdout, `Open this URL in your browser to pay with your wallet:`);
+      writeLine(stdout, options.card
+        ? 'Open this URL in your browser to pay by card:'
+        : 'Open this URL in your browser to pay with your wallet:');
       writeLine(stdout, url);
       writeLine(stdout, 'Waiting for payment to complete...');
     },

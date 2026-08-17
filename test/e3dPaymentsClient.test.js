@@ -104,6 +104,46 @@ test('getSessionResult GETs the result endpoint for the given session id', async
   }
 });
 
+test('createStripeCheckout posts to the stripe checkout endpoint', async () => {
+  let capturedUrl = null;
+  let capturedBody = null;
+  const restore = stubFetch(async (url, options) => {
+    capturedUrl = url;
+    capturedBody = JSON.parse(options.body);
+    return jsonResponse({ sessionId: 'cs_1', url: 'https://checkout.stripe.com/c/pay/cs_1', product: 'netdoctor', credits: 500 }, { status: 201 });
+  });
+
+  try {
+    const client = new E3DPaymentsClient({});
+    const result = await client.createStripeCheckout({ packId: 'single' });
+    assert.equal(capturedUrl, 'https://e3d.ai/api/payments/stripe/checkout');
+    assert.deepEqual(capturedBody, { product: 'netdoctor', packId: 'single' });
+    assert.equal(result.sessionId, 'cs_1');
+  } finally {
+    restore();
+  }
+});
+
+test('getStripeSessionResult GETs the stripe session result endpoint', async () => {
+  let capturedUrl = null;
+  let capturedMethod = null;
+  const restore = stubFetch(async (url, options) => {
+    capturedUrl = url;
+    capturedMethod = options.method;
+    return jsonResponse({ status: 'pending' });
+  });
+
+  try {
+    const client = new E3DPaymentsClient({});
+    const result = await client.getStripeSessionResult('cs with spaces');
+    assert.equal(capturedUrl, 'https://e3d.ai/api/payments/stripe/session/cs%20with%20spaces/result');
+    assert.equal(capturedMethod, 'GET');
+    assert.equal(result.status, 'pending');
+  } finally {
+    restore();
+  }
+});
+
 test('requestJson surfaces server error payloads with status and code', async () => {
   const restore = stubFetch(async () => jsonResponse(
     { message: 'Payment session not found or expired', code: 'SESSION_NOT_FOUND' },
