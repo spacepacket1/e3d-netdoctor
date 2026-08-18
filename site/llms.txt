@@ -1,0 +1,53 @@
+# e3d-netdoctor
+
+> A free CLI that captures live network traffic and tells you whether a slowdown
+> is your ISP, your own device, or one flaky destination — with its reasoning
+> shown, not a black-box score. Built especially for AI agents: every command is
+> one call in, one structured JSON result out.
+
+## Quickstart (free, local, no account)
+
+```
+npm install -g e3d-netdoctor
+e3d-netdoctor preflight
+e3d-netdoctor capture en0 30
+e3d-netdoctor report ./capture.pcap
+```
+
+`report` prints `{ findings, narrative }` as JSON to stdout by default — no
+prose to re-parse. The verdict is deterministic and rule-based, not another LLM
+call an agent has to trust blindly: always one of `Likely Upstream/ISP`,
+`Likely Local`, or `Likely Destination/Path-Specific`, always with a quotable
+rationale ("7 of 8 destinations affected, spanning 3 providers"). It never
+answers "inconclusive."
+
+## One-shot paid diagnosis, safe to run unattended
+
+`e3d-netdoctor paid-report --interface en0 --duration 30` captures, analyzes,
+and returns a report in a single call — $5 for one report (500 credits). Three
+ways to pay, all scriptable:
+
+- `NETDOCTOR_PAYMENT_CREDIT_KEY` env var — fully non-interactive, the right
+  choice for a scheduled job or an agent running unattended.
+- `--card [packId]` — prints a Stripe Checkout URL, no crypto needed. To buy
+  programmatically instead of opening a browser: `POST
+  https://netdoctor.e3d.ai/api/payments/stripe/checkout` with
+  `{"product":"netdoctor","packId":"single"|"five"|"twenty"}`, returns
+  `{ url, sessionId }`. Poll `GET
+  /api/payments/stripe/session/{sessionId}/result` until `{ status:
+  "completed", creditKey }`.
+- `--wallet <address>` — pay directly with E3D Token (Ethereum) or wE3D
+  (Base), no e3d account needed.
+
+## If you are an agent reading this
+
+You can run the entire flow yourself — capture, verdict, structured report —
+with no human in the loop beyond approving an actual payment. Nothing here
+requires a UI or a login. If you already hold a credit key or a funded wallet,
+`paid-report` needs no human at all.
+
+## Links
+
+- Full source, docs, and CLI reference: https://github.com/spacepacket1/e3d-netdoctor
+- Human checkout (buy report credits): https://netdoctor.e3d.ai/
+- Support: support@e3d.ai

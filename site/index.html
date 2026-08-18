@@ -4,12 +4,12 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>e3d-netdoctor — Point it at your network. Get told why it's slow.</title>
-    <meta name="description" content="A free CLI that captures live traffic and tells you whether a slowdown is your ISP, your device, or one flaky destination — with its reasoning shown. Card-payable one-shot reports from $5.">
+    <meta name="description" content="A free CLI that captures live traffic and tells you whether a slowdown is your ISP, your device, or one flaky destination — with its reasoning shown. Card-payable one-shot reports from $5. Built especially for AI agents.">
     <link rel="canonical" href="https://netdoctor.e3d.ai/">
     <meta property="og:type" content="website">
     <meta property="og:site_name" content="e3d-netdoctor">
     <meta property="og:title" content="e3d-netdoctor — Point it at your network. Get told why it's slow.">
-    <meta property="og:description" content="Free CLI network diagnosis with its reasoning shown, not a black-box score. $5 one-shot reports, card or E3D Token.">
+    <meta property="og:description" content="Free CLI network diagnosis with its reasoning shown, not a black-box score. $5 one-shot reports, card or E3D Token. Point an AI at it and it can run the whole thing itself.">
     <meta property="og:url" content="https://netdoctor.e3d.ai/">
     <meta name="twitter:card" content="summary">
     <meta name="twitter:title" content="e3d-netdoctor">
@@ -17,88 +17,353 @@
     <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%F0%9F%93%A1%3C/text%3E%3C/svg%3E">
     <style>
       :root {
-        --bg: #0b0f14;
-        --panel: #121822;
-        --line: #232c38;
-        --text: #e6edf3;
-        --muted: #93a1b0;
-        --accent: #5fd3c4;
-        --accent-strong: #7ee6d8;
-        --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        --bg: #080b10;
+        --bg-2: #0c1119;
+        --panel: #121924;
+        --panel-2: #161f2c;
+        --line: #232e3d;
+        --line-soft: #1a2330;
+        --text: #e9eef4;
+        --muted: #8b9bac;
+        --muted-2: #64758a;
+        --accent: #57e0c9;
+        --accent-strong: #8ff2e0;
+        --accent-dim: rgba(87, 224, 201, 0.14);
+        --violet: #a78bfa;
+        --violet-dim: rgba(167, 139, 250, 0.14);
+        --amber: #f5b969;
+        --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
         --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+        --radius: 14px;
       }
       * { box-sizing: border-box; }
+      @media (prefers-reduced-motion: reduce) {
+        * { animation-duration: 0.001ms !important; animation-iteration-count: 1 !important; transition-duration: 0.001ms !important; }
+      }
+      html { background: var(--bg); }
       body {
         margin: 0;
         background: var(--bg);
         color: var(--text);
         font-family: var(--sans);
-        line-height: 1.55;
+        line-height: 1.6;
+        position: relative;
       }
-      .wrap { max-width: 760px; margin: 0 auto; padding: 48px 20px 80px; }
-      h1 { font-size: 1.7rem; margin: 0 0 6px; }
-      h1 .tag { display: block; font-size: 1.05rem; color: var(--accent); font-weight: 600; margin-top: 6px; }
-      h2 { font-size: 1.15rem; margin: 40px 0 12px; border-top: 1px solid var(--line); padding-top: 28px; }
-      p { color: var(--text); }
-      p.lead { color: var(--muted); font-size: 1rem; }
-      a { color: var(--accent-strong); }
-      code { font-family: var(--mono); background: var(--panel); padding: 1px 5px; border-radius: 4px; font-size: 0.9em; }
-      pre {
+
+      /* ---------- ambient backdrop ---------- */
+      .backdrop {
+        position: fixed;
+        inset: 0;
+        z-index: 0;
+        pointer-events: none;
+        overflow: hidden;
+        background: var(--bg);
+      }
+      .backdrop::before {
+        content: "";
+        position: absolute;
+        inset: 0;
+        background-image:
+          radial-gradient(circle at 1px 1px, rgba(255, 255, 255, 0.055) 1px, transparent 0);
+        background-size: 28px 28px;
+        -webkit-mask-image: radial-gradient(ellipse 90% 70% at 50% 0%, #000 40%, transparent 85%);
+                mask-image: radial-gradient(ellipse 90% 70% at 50% 0%, #000 40%, transparent 85%);
+      }
+      .glow {
+        position: absolute;
+        border-radius: 50%;
+        filter: blur(90px);
+        opacity: 0.28;
+      }
+      .glow.teal { width: 560px; height: 560px; top: -220px; left: 50%; margin-left: -640px; background: var(--accent); }
+      .glow.violet { width: 480px; height: 480px; top: -160px; right: 50%; margin-right: -680px; background: var(--violet); opacity: 0.18; }
+      .packet {
+        position: absolute;
+        width: 5px; height: 5px;
+        border-radius: 50%;
+        background: var(--accent);
+        opacity: 0;
+        animation: drift 7s linear infinite;
+      }
+      @keyframes drift {
+        0% { opacity: 0; transform: translateX(0) translateY(0); }
+        8% { opacity: 0.65; }
+        92% { opacity: 0.5; }
+        100% { opacity: 0; transform: translateX(120px) translateY(-14px); }
+      }
+
+      .content { position: relative; z-index: 1; }
+      .wrap { max-width: 900px; margin: 0 auto; padding: 0 24px; }
+
+      /* ---------- top bar ---------- */
+      .topbar {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 26px 0;
+        gap: 12px;
+      }
+      .brand { display: flex; align-items: center; gap: 9px; font-weight: 700; letter-spacing: -0.01em; }
+      .brand .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 0 4px var(--accent-dim); }
+      .topbar nav { display: flex; align-items: center; gap: 22px; font-size: 0.88rem; }
+      .topbar nav a { color: var(--muted); text-decoration: none; }
+      .topbar nav a:hover { color: var(--text); }
+      .topbar nav a.cta {
+        color: #06231f;
+        background: var(--accent);
+        padding: 8px 14px;
+        border-radius: 7px;
+        font-weight: 700;
+      }
+      .topbar nav a.cta:hover { background: var(--accent-strong); }
+
+      /* ---------- hero ---------- */
+      .hero {
+        display: grid;
+        grid-template-columns: 1.05fr 1fr;
+        gap: 40px;
+        align-items: center;
+        padding: 40px 0 68px;
+      }
+      @media (max-width: 860px) {
+        .hero { grid-template-columns: 1fr; padding: 16px 0 48px; }
+      }
+      .eyebrow {
+        display: inline-flex;
+        align-items: center;
+        gap: 7px;
+        font-size: 0.78rem;
+        font-weight: 600;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+        color: var(--accent);
+        background: var(--accent-dim);
+        border: 1px solid rgba(87, 224, 201, 0.25);
+        padding: 6px 12px;
+        border-radius: 100px;
+        margin-bottom: 20px;
+      }
+      .eyebrow .blip { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); animation: pulse 1.8s ease-in-out infinite; }
+      @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
+      h1 {
+        font-size: clamp(2rem, 4vw, 2.7rem);
+        line-height: 1.12;
+        margin: 0 0 18px;
+        letter-spacing: -0.02em;
+        font-weight: 800;
+      }
+      h1 em {
+        font-style: normal;
+        background: linear-gradient(100deg, var(--accent-strong), var(--accent) 60%);
+        -webkit-background-clip: text;
+        background-clip: text;
+        color: transparent;
+      }
+      p.lead { color: var(--muted); font-size: 1.06rem; max-width: 46ch; margin: 0 0 28px; }
+      .hero-ctas { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+      .btn {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        border-radius: 8px;
+        padding: 12px 18px;
+        font-weight: 700;
+        font-size: 0.94rem;
+        text-decoration: none;
+        border: 1px solid transparent;
+        cursor: pointer;
+      }
+      .btn-primary { background: var(--accent); color: #06231f; }
+      .btn-primary:hover { background: var(--accent-strong); }
+      .btn-ghost { color: var(--text); border-color: var(--line); background: transparent; }
+      .btn-ghost:hover { border-color: var(--muted-2); }
+      .install-chip {
+        margin-top: 22px;
+        display: inline-flex;
+        align-items: center;
+        gap: 10px;
         font-family: var(--mono);
         font-size: 0.85rem;
         background: var(--panel);
         border: 1px solid var(--line);
         border-radius: 8px;
-        padding: 16px;
+        padding: 10px 12px;
+        color: var(--text);
+      }
+      .install-chip .prompt { color: var(--muted-2); }
+      .install-chip button {
+        background: transparent;
+        border: none;
+        color: var(--muted);
+        cursor: pointer;
+        display: flex;
+        padding: 2px;
+        border-radius: 4px;
+      }
+      .install-chip button:hover { color: var(--accent-strong); background: var(--line-soft); }
+
+      /* ---------- terminal mockup ---------- */
+      .terminal {
+        background: linear-gradient(180deg, var(--panel-2), var(--panel));
+        border: 1px solid var(--line);
+        border-radius: var(--radius);
+        overflow: hidden;
+        box-shadow: 0 30px 60px -30px rgba(0, 0, 0, 0.7), 0 0 0 1px rgba(255,255,255,0.02) inset;
+      }
+      .terminal-bar {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 11px 14px;
+        border-bottom: 1px solid var(--line);
+        background: rgba(255,255,255,0.02);
+      }
+      .terminal-bar .tl { width: 10px; height: 10px; border-radius: 50%; }
+      .tl.r { background: #ff5f57; } .tl.y { background: #febc2e; } .tl.g { background: #28c840; }
+      .terminal-bar .title { margin-left: 6px; font-size: 0.78rem; color: var(--muted-2); font-family: var(--mono); }
+      .terminal pre {
+        margin: 0;
+        padding: 18px 16px 20px;
+        font-family: var(--mono);
+        font-size: 0.8rem;
+        line-height: 1.65;
         overflow-x: auto;
         white-space: pre;
       }
-      table { width: 100%; border-collapse: collapse; margin: 12px 0; font-size: 0.9rem; }
-      th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
-      th { color: var(--muted); font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.04em; }
-      .callout {
-        background: var(--panel);
-        border: 1px solid var(--line);
-        border-left: 3px solid var(--accent);
-        border-radius: 6px;
-        padding: 14px 16px;
-        font-size: 0.95rem;
+      .terminal .c-prompt { color: var(--accent); }
+      .terminal .c-key { color: #7db8ff; }
+      .terminal .c-str { color: var(--amber); }
+      .terminal .c-num { color: var(--accent-strong); }
+      .terminal .c-muted { color: var(--muted-2); }
+      .terminal .c-good { color: #7ee08a; font-weight: 600; }
+
+      /* ---------- generic sections ---------- */
+      section { padding: 56px 0; border-top: 1px solid var(--line-soft); }
+      .kicker { font-size: 0.78rem; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted-2); margin: 0 0 10px; }
+      h2 { font-size: 1.5rem; margin: 0 0 14px; letter-spacing: -0.01em; }
+      .section-lead { color: var(--muted); max-width: 62ch; margin: 0 0 28px; }
+
+      blockquote.big {
+        margin: 0 0 24px;
+        font-size: 1.25rem;
+        line-height: 1.5;
         color: var(--text);
+        border-left: 3px solid var(--accent);
+        padding-left: 20px;
       }
-      .packs { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; margin: 16px 0; }
-      .pack {
+      blockquote.big footer { border: none; padding: 0; margin: 10px 0 0; color: var(--muted-2); font-size: 0.85rem; }
+      p { color: var(--text); }
+      a { color: var(--accent-strong); }
+      code { font-family: var(--mono); background: var(--panel); padding: 1px 6px; border-radius: 4px; font-size: 0.88em; border: 1px solid var(--line-soft); }
+
+      .verdicts { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
+      @media (max-width: 760px) { .verdicts { grid-template-columns: 1fr; } }
+      .verdict-card {
         background: var(--panel);
         border: 1px solid var(--line);
+        border-radius: var(--radius);
+        padding: 20px;
+      }
+      .verdict-card .icon {
+        width: 34px; height: 34px;
+        display: flex; align-items: center; justify-content: center;
         border-radius: 8px;
-        padding: 16px;
+        background: var(--accent-dim);
+        color: var(--accent);
+        margin-bottom: 14px;
+      }
+      .verdict-card h3 { font-size: 0.98rem; margin: 0 0 8px; }
+      .verdict-card p { color: var(--muted); font-size: 0.88rem; margin: 0; }
+
+      /* ---------- agent panel ---------- */
+      .agent-panel {
+        position: relative;
+        border-radius: var(--radius);
+        padding: 32px;
+        background:
+          radial-gradient(circle at 100% 0%, rgba(167, 139, 250, 0.16), transparent 55%),
+          radial-gradient(circle at 0% 100%, rgba(87, 224, 201, 0.12), transparent 55%),
+          var(--panel);
+        border: 1px solid var(--line);
+        overflow: hidden;
+      }
+      .agent-panel .badge {
+        display: inline-flex; align-items: center; gap: 7px;
+        font-size: 0.76rem; font-weight: 700; letter-spacing: 0.03em;
+        color: var(--violet);
+        background: var(--violet-dim);
+        border: 1px solid rgba(167, 139, 250, 0.3);
+        padding: 5px 11px; border-radius: 100px;
+        margin-bottom: 16px;
+      }
+      .agent-panel h2 { margin-bottom: 12px; }
+      .agent-panel .section-lead { margin-bottom: 22px; }
+      .agent-row { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; align-items: start; }
+      @media (max-width: 760px) { .agent-row { grid-template-columns: 1fr; } }
+      .agent-row ul { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 12px; }
+      .agent-row li { display: flex; gap: 10px; font-size: 0.92rem; color: var(--text); }
+      .agent-row li .bullet { color: var(--violet); flex-shrink: 0; margin-top: 2px; }
+      .agent-code {
+        background: var(--bg-2);
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        padding: 14px 16px;
+        font-family: var(--mono);
+        font-size: 0.82rem;
+        color: var(--muted);
+      }
+      .agent-code .c-prompt { color: var(--violet); }
+      .agent-code a { color: var(--accent-strong); }
+
+      /* ---------- pricing ---------- */
+      .packs { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 14px; margin: 8px 0 0; }
+      .pack {
+        position: relative;
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: var(--radius);
+        padding: 22px 20px;
         display: flex;
         flex-direction: column;
         gap: 6px;
+        transition: border-color 0.15s ease, transform 0.15s ease;
       }
-      .pack .name { font-weight: 700; }
-      .pack .price { font-size: 1.4rem; font-family: var(--mono); }
-      .pack .desc { color: var(--muted); font-size: 0.85rem; flex-grow: 1; }
+      .pack:hover { border-color: var(--muted-2); transform: translateY(-2px); }
+      .pack.featured { border-color: rgba(87, 224, 201, 0.4); background: linear-gradient(180deg, rgba(87,224,201,0.06), var(--panel) 60%); }
+      .pack .badge-pop {
+        position: absolute; top: -11px; left: 20px;
+        background: var(--accent); color: #06231f;
+        font-size: 0.68rem; font-weight: 800; letter-spacing: 0.04em; text-transform: uppercase;
+        padding: 4px 9px; border-radius: 100px;
+      }
+      .pack .name { font-weight: 700; font-size: 0.95rem; margin-top: 4px; }
+      .pack .price { font-size: 1.9rem; font-family: var(--mono); font-weight: 700; letter-spacing: -0.02em; }
+      .pack .per-report { color: var(--muted-2); font-size: 0.78rem; margin-top: -4px; }
+      .pack .desc { color: var(--muted); font-size: 0.85rem; flex-grow: 1; margin: 10px 0 16px; }
       button.buy {
         background: var(--accent);
         color: #06231f;
         border: none;
-        border-radius: 6px;
-        padding: 10px 14px;
+        border-radius: 7px;
+        padding: 11px 14px;
         font-weight: 700;
         font-size: 0.9rem;
         cursor: pointer;
       }
       button.buy:disabled { opacity: 0.6; cursor: default; }
       button.buy:hover:not(:disabled) { background: var(--accent-strong); }
-      #checkout-status { margin-top: 14px; font-size: 0.9rem; }
-      #checkout-status.error { color: #ff8080; }
+      .pack.featured button.buy { background: var(--accent-strong); }
+
+      #checkout-status { margin-top: 18px; font-size: 0.92rem; }
+      #checkout-status.error { color: #ff8f8f; }
       #checkout-status .key-box {
         display: flex;
         gap: 8px;
         align-items: center;
         margin-top: 10px;
+        flex-wrap: wrap;
       }
-      #checkout-status code.key { font-size: 0.85rem; word-break: break-all; }
+      #checkout-status code.key { font-size: 0.82rem; word-break: break-all; }
       #checkout-status button.copy {
         background: transparent;
         border: 1px solid var(--line);
@@ -109,104 +374,207 @@
         cursor: pointer;
         white-space: nowrap;
       }
-      footer {
-        margin-top: 56px;
-        padding-top: 20px;
-        border-top: 1px solid var(--line);
-        color: var(--muted);
+      #checkout-status button.copy:hover { border-color: var(--muted-2); }
+      .notice { color: var(--muted-2); font-size: 0.85rem; }
+
+      footer.site {
+        padding: 30px 0 60px;
+        color: var(--muted-2);
         font-size: 0.85rem;
         display: flex;
         justify-content: space-between;
         flex-wrap: wrap;
         gap: 10px;
       }
-      footer a { color: var(--muted); }
-      .notice { color: var(--muted); font-size: 0.85rem; }
+      footer.site a { color: var(--muted); }
+      footer.site a:hover { color: var(--text); }
     </style>
   </head>
   <body>
-    <div class="wrap">
-      <h1>e3d-netdoctor
-        <span class="tag">Point it at your network. Get told why it's slow.</span>
-      </h1>
-      <p class="lead">
-        A one-shot, no-UI CLI that captures live traffic and figures out whether
-        your slowdown is your ISP, your own device, or one flaky destination —
-        with its reasoning shown, not a black-box score.
-      </p>
+    <div class="backdrop" aria-hidden="true">
+      <div class="glow teal"></div>
+      <div class="glow violet"></div>
+      <div class="packet" style="top: 12%; left: 8%; animation-delay: 0s;"></div>
+      <div class="packet" style="top: 22%; left: 30%; animation-delay: 1.4s;"></div>
+      <div class="packet" style="top: 8%; left: 55%; animation-delay: 2.8s;"></div>
+      <div class="packet" style="top: 30%; left: 72%; animation-delay: 4.2s;"></div>
+      <div class="packet" style="top: 4%; left: 85%; animation-delay: 5.6s;"></div>
+    </div>
 
-      <div class="callout">
-        <strong>Free to run locally.</strong> <code>capture</code> + <code>report</code>
-        need no payment and no account. The one-shot <code>paid-report</code> command
-        — capture, analyze, and get a report in a single call, mainly built for
-        automation and agents — is <strong>$5 by card</strong>, no wallet or crypto
-        required, or payable with E3D Token if you already hold it.
+    <div class="content">
+      <div class="wrap">
+        <div class="topbar">
+          <div class="brand"><span class="dot"></span> e3d-netdoctor</div>
+          <nav>
+            <a href="#pricing">Pricing</a>
+            <a href="/llms.txt">llms.txt</a>
+            <a href="https://github.com/spacepacket1/e3d-netdoctor" target="_blank" rel="noreferrer">GitHub</a>
+            <a class="cta" href="#pricing">Buy credits</a>
+          </nav>
+        </div>
+
+        <div class="hero">
+          <div>
+            <div class="eyebrow"><span class="blip"></span> Reasoning shown, not a black-box score</div>
+            <h1>Point it at your network.<br><em>Get told why it's slow.</em></h1>
+            <p class="lead">
+              A one-shot, no-UI CLI that captures live traffic and figures out
+              whether your slowdown is your ISP, your own device, or one flaky
+              destination — with the reasoning shown, every time.
+            </p>
+            <div class="hero-ctas">
+              <a class="btn btn-primary" href="#pricing">Buy report credits — from $5</a>
+              <a class="btn btn-ghost" href="https://github.com/spacepacket1/e3d-netdoctor" target="_blank" rel="noreferrer">View source</a>
+            </div>
+            <div class="install-chip">
+              <span class="prompt">$</span> npm install -g e3d-netdoctor
+              <button type="button" id="copy-install" title="Copy" aria-label="Copy install command">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
+              </button>
+            </div>
+          </div>
+
+          <div class="terminal">
+            <div class="terminal-bar">
+              <span class="tl r"></span><span class="tl y"></span><span class="tl g"></span>
+              <span class="title">paid-report --interface en0 --card</span>
+            </div>
+            <pre><span class="c-prompt">$</span> e3d-netdoctor paid-report --interface en0 --card
+
+<span class="c-muted">Only analyze traffic on networks you are authorized to monitor.
+Requesting e3d payment before capture/analysis...</span>
+<span class="c-good">✓ payment confirmed — 500 credits</span>
+{
+  <span class="c-key">"findings"</span>: {
+    <span class="c-key">"verdict"</span>: {
+      <span class="c-key">"headline"</span>: <span class="c-str">"Likely upstream/ISP"</span>,
+      <span class="c-key">"confidence"</span>: <span class="c-str">"High"</span>,
+      <span class="c-key">"rationale"</span>: <span class="c-str">"7 of 8 independent</span>
+        <span class="c-str">destinations affected, spanning 3 providers"</span>
+    }
+  },
+  <span class="c-key">"payment"</span>: { <span class="c-key">"creditsRemaining"</span>: <span class="c-num">1500</span> }
+}</pre>
+          </div>
+        </div>
+
+        <section id="why">
+          <p class="kicker">Why this exists</p>
+          <blockquote class="big">
+            “Is it my wifi, or is it Comcast again?”
+            <footer>— every network engineer and Wireshark user, at some point</footer>
+          </blockquote>
+          <p class="section-lead">
+            That question is answerable from a single packet capture —
+            <em>if</em> you know to group retransmissions and RTT outliers by
+            destination <strong>and</strong> by local device, and weigh
+            provider diversity instead of raw destination count. Most people
+            don't do that math by hand. netdoctor does, every time, and shows
+            its work.
+          </p>
+          <div class="verdicts">
+            <div class="verdict-card">
+              <div class="icon">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 20h.01M7 20v-4M12 20v-8M17 20V8M22 20V4"></path></svg>
+              </div>
+              <h3>Likely Upstream/ISP</h3>
+              <p>Signal spread across many unrelated destinations and providers — not one device.</p>
+            </div>
+            <div class="verdict-card">
+              <div class="icon">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="16" rx="3"></rect><path d="M9 9h6v6H9z"></path></svg>
+              </div>
+              <h3>Likely Local</h3>
+              <p>Signal concentrated on one local device across many destinations — bad wifi, flaky NIC, bad cabling.</p>
+            </div>
+            <div class="verdict-card">
+              <div class="icon">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M12 2v4M12 18v4M4.9 4.9l2.8 2.8M16.3 16.3l2.8 2.8M2 12h4M18 12h4M4.9 19.1l2.8-2.8M16.3 7.7l2.8-2.8"></path></svg>
+              </div>
+              <h3>Likely Destination/Path-Specific</h3>
+              <p>Signal confined to one or two destinations while everything else stays clean.</p>
+            </div>
+          </div>
+        </section>
+
+        <section id="agents">
+          <div class="agent-panel">
+            <span class="badge">FOR AGENTS</span>
+            <h2>Got an AI with shell access? Hand it the URL.</h2>
+            <p class="section-lead">
+              netdoctor doesn't need a human driving it. Every command is one
+              call in, one structured JSON result out — no prose to re-parse,
+              no dashboard to click through, no login. Give your agent
+              <code>netdoctor.e3d.ai</code> and it can read <code>llms.txt</code>,
+              install the CLI, capture, diagnose, and even pay for its own
+              report — all without you touching a terminal.
+            </p>
+            <div class="agent-row">
+              <ul>
+                <li><span class="bullet">→</span> Deterministic, rule-based verdicts — never another model call your agent has to trust blindly.</li>
+                <li><span class="bullet">→</span> Machine-readable rationale, quotable straight back to whoever it's working for.</li>
+                <li><span class="bullet">→</span> Non-interactive payment path (a pre-provisioned credit key) — safe to run on a schedule with zero human involvement.</li>
+              </ul>
+              <div class="agent-code">
+                <div><span class="c-prompt">$</span> curl -s https://netdoctor.e3d.ai/llms.txt</div>
+                <div style="margin-top: 8px; color: var(--muted-2);">→ install steps, JSON schema, and the checkout API, all in one file the model can read directly.</div>
+                <div style="margin-top: 10px;"><a href="/llms.txt">Read llms.txt →</a></div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section id="pricing">
+          <p class="kicker">Buy report credits</p>
+          <h2>Pay per report. No subscription.</h2>
+          <p class="section-lead">
+            500 credits = 1 <code>paid-report</code> run. Pay with a card
+            below, or use <code>e3d-netdoctor paid-report --card</code> from
+            the CLI directly — same checkout, no browser round-trip needed.
+          </p>
+          <div class="packs" id="packs">
+            <div class="pack">
+              <div class="name">Single Report</div>
+              <div class="price">$5</div>
+              <div class="per-report">$5.00 / report</div>
+              <div class="desc">500 credits — 1 report. Try it once, no commitment.</div>
+              <button type="button" class="buy" data-pack-id="single">Buy — $5</button>
+            </div>
+            <div class="pack featured">
+              <div class="badge-pop">Most popular</div>
+              <div class="name">Five Reports</div>
+              <div class="price">$20</div>
+              <div class="per-report">$4.00 / report</div>
+              <div class="desc">2,500 credits — 5 reports. For recurring "is it me or them" checks.</div>
+              <button type="button" class="buy" data-pack-id="five">Buy — $20</button>
+            </div>
+            <div class="pack">
+              <div class="name">Twenty Reports</div>
+              <div class="price">$70</div>
+              <div class="per-report">$3.50 / report</div>
+              <div class="desc">10,000 credits — 20 reports. Best rate, built for automation and fleets.</div>
+              <button type="button" class="buy" data-pack-id="twenty">Buy — $70</button>
+            </div>
+          </div>
+          <div id="checkout-status"></div>
+          <p class="notice" style="margin-top: 18px;">
+            Prefer crypto? <code>paid-report --wallet 0xYourAddress</code> pays
+            directly with E3D Token — no e3d account needed. Full flags:
+            <a href="https://github.com/spacepacket1/e3d-netdoctor#paying-for-a-report" target="_blank" rel="noreferrer">Paying for a report →</a>
+          </p>
+        </section>
+
+        <footer class="site">
+          <span>© 2026 FutCo LLC · AI consulting by <a href="https://applied.futco.ai" target="_blank" rel="noreferrer">Applied FutCo AI</a></span>
+          <nav>
+            <a href="https://github.com/spacepacket1/e3d-netdoctor" target="_blank" rel="noreferrer">GitHub</a>
+            &nbsp;·&nbsp;
+            <a href="/llms.txt">llms.txt</a>
+            &nbsp;·&nbsp;
+            <a href="mailto:support@e3d.ai">support@e3d.ai</a>
+          </nav>
+        </footer>
       </div>
-
-      <h2>Try it free</h2>
-      <pre>npm install -g e3d-netdoctor
-e3d-netdoctor preflight
-e3d-netdoctor capture en0 30
-e3d-netdoctor report ./capture.pcap</pre>
-      <p class="notice">
-        Full source, docs, and the <code>--card</code>/<code>--wallet</code> paid flow:
-        <a href="https://github.com/spacepacket1/e3d-netdoctor" target="_blank" rel="noreferrer">github.com/spacepacket1/e3d-netdoctor</a>
-      </p>
-
-      <h2>Why this exists</h2>
-      <p>
-        Every network engineer and Wireshark user has had this conversation:
-        “Is it my wifi, or is it Comcast again?” That question is answerable from
-        a single packet capture — <em>if</em> you know to group retransmissions
-        and RTT outliers by destination <strong>and</strong> by local device, and
-        weigh provider diversity instead of raw destination count. Most people
-        don't do that math by hand. netdoctor does, every time, and shows its work.
-      </p>
-      <table>
-        <thead><tr><th>Verdict</th><th>Means</th></tr></thead>
-        <tbody>
-          <tr><td>Likely Upstream/ISP</td><td>Signal spread across many unrelated destinations and providers — not one device</td></tr>
-          <tr><td>Likely Local</td><td>Signal concentrated on one local device (MAC) across many destinations — bad wifi, flaky NIC, bad cabling</td></tr>
-          <tr><td>Likely Destination/Path-Specific</td><td>Signal confined to one or two destinations while everything else is clean</td></tr>
-        </tbody>
-      </table>
-
-      <h2>Buy report credits</h2>
-      <p class="lead">
-        500 credits = 1 <code>paid-report</code> run. Pay with a card below, or use
-        <code>e3d-netdoctor paid-report --card</code> from the CLI directly — same
-        checkout, no browser round-trip needed.
-      </p>
-      <div class="packs" id="packs">
-        <div class="pack">
-          <div class="name">Single Report</div>
-          <div class="price">$5</div>
-          <div class="desc">500 credits — 1 report</div>
-          <button type="button" class="buy" data-pack-id="single">Buy — $5</button>
-        </div>
-        <div class="pack">
-          <div class="name">Five Reports</div>
-          <div class="price">$20</div>
-          <div class="desc">2,500 credits — 5 reports</div>
-          <button type="button" class="buy" data-pack-id="five">Buy — $20</button>
-        </div>
-        <div class="pack">
-          <div class="name">Twenty Reports</div>
-          <div class="price">$70</div>
-          <div class="desc">10,000 credits — 20 reports</div>
-          <button type="button" class="buy" data-pack-id="twenty">Buy — $70</button>
-        </div>
-      </div>
-      <div id="checkout-status"></div>
-
-      <footer>
-        <span>© 2026 FutCo LLC · AI consulting by <a href="https://applied.futco.ai" target="_blank" rel="noreferrer">Applied FutCo AI</a></span>
-        <nav>
-          <a href="https://github.com/spacepacket1/e3d-netdoctor" target="_blank" rel="noreferrer">GitHub</a>
-          &nbsp;·&nbsp;
-          <a href="mailto:support@e3d.ai">support@e3d.ai</a>
-        </nav>
-      </footer>
     </div>
 
     <script>
@@ -304,6 +672,17 @@ e3d-netdoctor report ./capture.pcap</pre>
               });
           });
         });
+
+        var copyInstall = document.querySelector('#copy-install');
+        if (copyInstall) {
+          copyInstall.addEventListener('click', function () {
+            navigator.clipboard.writeText('npm install -g e3d-netdoctor').then(function () {
+              var original = copyInstall.innerHTML;
+              copyInstall.innerHTML = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>';
+              setTimeout(function () { copyInstall.innerHTML = original; }, 1300);
+            });
+          });
+        }
       }());
     </script>
   </body>
