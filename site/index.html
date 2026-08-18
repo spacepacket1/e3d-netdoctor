@@ -330,16 +330,26 @@
       }
       .pack:hover { border-color: var(--muted-2); transform: translateY(-2px); }
       .pack.featured { border-color: rgba(87, 224, 201, 0.4); background: linear-gradient(180deg, rgba(87,224,201,0.06), var(--panel) 60%); }
+      .pack.free { border-style: dashed; }
       .pack .badge-pop {
         position: absolute; top: -11px; left: 20px;
         background: var(--accent); color: #06231f;
         font-size: 0.68rem; font-weight: 800; letter-spacing: 0.04em; text-transform: uppercase;
         padding: 4px 9px; border-radius: 100px;
       }
+      .pack .badge-pop.badge-muted { background: var(--line-soft); color: var(--muted-2); }
       .pack .name { font-weight: 700; font-size: 0.95rem; margin-top: 4px; }
       .pack .price { font-size: 1.9rem; font-family: var(--mono); font-weight: 700; letter-spacing: -0.02em; }
       .pack .per-report { color: var(--muted-2); font-size: 0.78rem; margin-top: -4px; }
       .pack .desc { color: var(--muted); font-size: 0.85rem; flex-grow: 1; margin: 10px 0 16px; }
+      .pack .cta-link {
+        display: flex; align-items: center; justify-content: center; gap: 6px;
+        background: transparent; color: var(--text);
+        border: 1px solid var(--line); border-radius: 7px;
+        padding: 11px 14px; font-weight: 700; font-size: 0.9rem;
+        text-decoration: none;
+      }
+      .pack .cta-link:hover { border-color: var(--muted-2); color: var(--accent-strong); }
       button.buy {
         background: var(--accent);
         color: #06231f;
@@ -525,14 +535,22 @@ Requesting e3d payment before capture/analysis...</span>
         </section>
 
         <section id="pricing">
-          <p class="kicker">Buy report credits</p>
-          <h2>Pay per report. No subscription.</h2>
+          <p class="kicker">Free, or pay per report</p>
+          <h2>Run it yourself for free. Pay only for the one-shot hosted version.</h2>
           <p class="section-lead">
             500 credits = 1 <code>paid-report</code> run. Pay with a card
             below, or use <code>e3d-netdoctor paid-report --card</code> from
             the CLI directly — same checkout, no browser round-trip needed.
           </p>
           <div class="packs" id="packs">
+            <div class="pack free">
+              <div class="badge-pop badge-muted">No card, no account</div>
+              <div class="name">Capture &amp; Report</div>
+              <div class="price">$0</div>
+              <div class="per-report">runs on your machine</div>
+              <div class="desc">The full pipeline — capture, deterministic verdict, JSON report — runs free, forever, on your own hardware. Only the one-shot hosted <code>paid-report</code> convenience below costs anything.</div>
+              <a class="cta-link" href="https://github.com/spacepacket1/e3d-netdoctor#quickstart" target="_blank" rel="noreferrer">Get started free →</a>
+            </div>
             <div class="pack">
               <div class="name">Single Report</div>
               <div class="price">$5</div>
