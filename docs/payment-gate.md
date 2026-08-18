@@ -58,8 +58,8 @@ The payment client is modeled on `e3d-agent/src/e3d/payments-client.ts` and uses
 
 Required runtime values:
 
-- `NETDOCTOR_PAYMENT_CREDIT_KEY` or `E3D_PAYMENT_CREDIT_KEY`: the requester credit key to spend.
-- `NETDOCTOR_PAYMENT_SERVICE_KEY`: internal service key accepted by the e3d `/api/payments/credits/spend` endpoint.
+- `NETDOCTOR_PAYMENT_CREDIT_KEY` or `E3D_PAYMENT_CREDIT_KEY`: the requester credit key to spend (from a Stripe purchase, wallet payment, or a pre-provisioned key).
+- `NETDOCTOR_PAYMENT_SERVICE_KEY`: **optional.** The internal service key `/api/payments/credits/spend` requires to authorize a spend, on top of the credit key itself. The CLI ships with a working default (`DEFAULT_NETDOCTOR_INTERNAL_SERVICE_KEY` in `src/paymentGate.js`) scoped to the netdoctor product only, so a normal customer never needs to set this — it only lets a caller spend the specific credit key it already presents, nothing more. Only set this if you're running the payment client against your own, separately registered e3d payments backend.
 - `E3D_BASE_URL`: optional, defaults to `https://e3d.ai`.
 - `NETDOCTOR_PAYMENT_PRODUCT`: optional, defaults to `netdoctor`.
 - `NETDOCTOR_REPORT_ROUTE`: optional, defaults to `/netdoctor/report`.

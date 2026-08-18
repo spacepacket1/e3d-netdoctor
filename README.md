@@ -308,7 +308,7 @@ nothing to silently fail on a machine without internet access.
 | Narrative generation | `report`/`deliver` always use a deterministic template, regardless of these. `paid-report` uses `ANTHROPIC_API_KEY` (preferred if set) or `OPENAI_API_KEY` (used if Anthropic's isn't set); if neither is set, it calls e3d's hosted narrative endpoint instead (paid for out of the report's 500 credits) rather than falling back to the template. Optional `NETDOCTOR_ANTHROPIC_MODEL`/`NETDOCTOR_OPENAI_MODEL`/`NETDOCTOR_HOSTED_NARRATIVE_URL` to override the defaults. |
 | Email delivery | `NETDOCTOR_SMTP_HOST`, `NETDOCTOR_SMTP_PORT`, `NETDOCTOR_SMTP_SECURE`, `NETDOCTOR_SMTP_USER`, `NETDOCTOR_SMTP_PASSWORD` |
 | PDF export | `NETDOCTOR_BROWSER_PATH` (auto-detected otherwise) |
-| Payment gate | `NETDOCTOR_PAYMENT_CREDIT_KEY`, `NETDOCTOR_PAYMENT_SERVICE_KEY`, `E3D_BASE_URL` — see [`docs/payment-gate.md`](docs/payment-gate.md) |
+| Payment gate | `NETDOCTOR_PAYMENT_CREDIT_KEY` (required); `NETDOCTOR_PAYMENT_SERVICE_KEY` and `E3D_BASE_URL` are optional, with working defaults — see [`docs/payment-gate.md`](docs/payment-gate.md) |
 
 ## Testing
 

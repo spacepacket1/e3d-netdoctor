@@ -7,6 +7,17 @@ export const NETDOCTOR_REPORT_ROUTE = process.env.NETDOCTOR_REPORT_ROUTE || '/ne
 export const NETDOCTOR_REPORT_PRICE_CREDITS = Number(process.env.NETDOCTOR_REPORT_PRICE_CREDITS || 500);
 export const NETDOCTOR_PAYMENT_DOCS = 'docs/payment-gate.md';
 
+// This is an app-identity credential, not a user secret: it only ever
+// authorizes spending the specific credit key a caller already independently
+// possesses (see requireInternalProductAuth server-side), scoped to netdoctor
+// alone -- it can't spend any other product's credits or mint credits on its
+// own. Shipping it as the default is what makes the documented
+// NETDOCTOR_PAYMENT_CREDIT_KEY/--card/--wallet paths actually work for a real
+// customer instead of only for whoever holds the server's own .env.
+// NETDOCTOR_PAYMENT_SERVICE_KEY still overrides this, for anyone self-hosting
+// the payments backend with their own product registration.
+export const DEFAULT_NETDOCTOR_INTERNAL_SERVICE_KEY = '8fbc4e9a5391e605feeac816f0625cc20899b772deb48242cd983e4fa0eb120f';
+
 export class NetdoctorPaymentRequiredError extends Error {
   constructor(message, details = {}) {
     super(message);
@@ -80,7 +91,7 @@ export function createNetdoctorPaymentsClient(options = {}) {
     e3dBaseUrl: options.e3dBaseUrl || process.env.E3D_BASE_URL,
     token: options.token || process.env.E3D_PAYMENT_TOKEN,
     creditKey: options.creditKey || process.env.NETDOCTOR_PAYMENT_CREDIT_KEY || process.env.E3D_PAYMENT_CREDIT_KEY,
-    internalServiceKey: options.internalServiceKey || process.env.NETDOCTOR_PAYMENT_SERVICE_KEY,
+    internalServiceKey: options.internalServiceKey || process.env.NETDOCTOR_PAYMENT_SERVICE_KEY || DEFAULT_NETDOCTOR_INTERNAL_SERVICE_KEY,
   });
 }
 
