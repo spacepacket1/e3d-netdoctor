@@ -551,7 +551,7 @@ Requesting e3d payment before capture/analysis...</span>
 
         <section id="pricing">
           <p class="kicker">Free, or pay per report</p>
-          <h2>Run it yourself for free. Pay only to collapse it into one call.</h2>
+          <h2>The verdict is always free. Paying gets you an AI analyst's writeup.</h2>
           <p class="section-lead">
             500 credits = 1 <code>paid-report</code> run. Pay with a card
             below, or use <code>e3d-netdoctor paid-report --card</code> from
@@ -561,7 +561,7 @@ Requesting e3d payment before capture/analysis...</span>
           <div class="compare">
             <div class="compare-col">
               <div class="compare-label">
-                <span class="dot dot-free"></span> Free — two commands, run locally
+                <span class="dot dot-free"></span> Free — template narrative
               </div>
               <div class="terminal terminal-sm">
                 <div class="terminal-bar">
@@ -580,13 +580,20 @@ Requesting e3d payment before capture/analysis...</span>
         <span class="c-str">destinations affected, 3 providers"</span>
     }
   },
-  <span class="c-key">"narrative"</span>: { <span class="c-muted">"...":"..."</span> }
+  <span class="c-key">"narrative"</span>: {
+    <span class="c-key">"source"</span>: <span class="c-str">"fallback"</span>,
+    <span class="c-key">"executiveSummary"</span>: [
+      <span class="c-str">"Top bandwidth conversation:</span>
+      <span class="c-str">10.0.0.5↔1.1.1.1 moved 42.1 MB</span>
+      <span class="c-str">across 3,204 packets."</span>
+    ]
+  }
 }</pre>
               </div>
             </div>
             <div class="compare-col">
               <div class="compare-label">
-                <span class="dot dot-paid"></span> $5 — one call, non-interactive
+                <span class="dot dot-paid"></span> $5 — real AI narrative
               </div>
               <div class="terminal terminal-sm">
                 <div class="terminal-bar">
@@ -597,7 +604,6 @@ Requesting e3d payment before capture/analysis...</span>
 
 <span class="c-good">✓ payment confirmed — 500 credits</span>
 {
-  <span class="c-key">"payment"</span>: { <span class="c-key">"creditsRemaining"</span>: <span class="c-num">1500</span> },
   <span class="c-key">"findings"</span>: {
     <span class="c-key">"verdict"</span>: {
       <span class="c-key">"headline"</span>: <span class="c-str">"Likely upstream/ISP"</span>,
@@ -606,17 +612,27 @@ Requesting e3d payment before capture/analysis...</span>
         <span class="c-str">destinations affected, 3 providers"</span>
     }
   },
-  <span class="c-key">"narrative"</span>: { <span class="c-muted">"...":"..."</span> }
+  <span class="c-key">"narrative"</span>: {
+    <span class="c-key">"source"</span>: <span class="c-str">"e3d-hosted"</span>,
+    <span class="c-key">"executiveSummary"</span>: [
+      <span class="c-str">"Your connection is almost certainly</span>
+      <span class="c-str">upstream — this pattern shows up</span>
+      <span class="c-str">across 3 unrelated providers, not</span>
+      <span class="c-str">just one flaky site."</span>
+    ]
+  }
 }</pre>
               </div>
             </div>
           </div>
           <p class="compare-note">
-            Same pipeline, same deterministic verdict — <code>paid-report</code>
-            just collapses <code>capture</code> + <code>report</code> into one
-            non-interactive call with a payment receipt attached, which is what
-            actually matters for a cron job or an agent that can't run a
-            two-step dance.
+            The verdict logic is identical either way — deterministic,
+            rule-based, unit-tested, never "inconclusive." What <code>paid-report</code>
+            adds is a real AI-written analysis of <em>your</em> findings (Claude
+            or OpenAI, using your own key if you have one, e3d's otherwise),
+            in one non-interactive call with a payment receipt attached — the
+            free path always gets the plain-template writeup above, even if
+            you happen to have an API key configured.
           </p>
           <div class="packs" id="packs">
             <div class="pack free">
@@ -624,7 +640,7 @@ Requesting e3d payment before capture/analysis...</span>
               <div class="name">Capture &amp; Report</div>
               <div class="price">$0</div>
               <div class="per-report">runs on your machine</div>
-              <div class="desc">The full pipeline — capture, deterministic verdict, JSON report — runs free, forever, on your own hardware. Only the one-call <code>paid-report</code> convenience below costs anything.</div>
+              <div class="desc">The full pipeline — capture, deterministic verdict, template-written report — runs free, forever, on your own hardware. <code>paid-report</code> adds a real AI-written analysis and a one-call, non-interactive flow.</div>
               <a class="cta-link" href="https://github.com/spacepacket1/e3d-netdoctor#quickstart" target="_blank" rel="noreferrer">Get started free →</a>
             </div>
             <div class="pack">

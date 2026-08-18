@@ -235,6 +235,31 @@ test('report --speed-test passes speedTest: true through to buildReport, off by 
   assert.equal(capturedOptions.speedTest, true);
 });
 
+test('report always passes forceFallbackNarrative: true through to buildReport, regardless of local API keys', async () => {
+  const stdout = createWritableCapture();
+  const stderr = createWritableCapture();
+  let capturedOptions = null;
+
+  const exitCode = await runCli(['report', './fixtures/sample-syn.pcap'], {
+    stdout: stdout.stream,
+    stderr: stderr.stream,
+    ...createReportFixtureDeps({
+      buildReport: async (parsed, options) => {
+        capturedOptions = options;
+        return {
+          findings: { verdict: { headline: 'Inconclusive', confidence: 'Low' } },
+          narrative: { source: 'fallback' },
+          html: '<!doctype html><html><body>report</body></html>',
+          markdown: '# Inconclusive\n\nsample markdown report',
+        };
+      },
+    }),
+  });
+
+  assert.equal(exitCode, 0);
+  assert.equal(capturedOptions.forceFallbackNarrative, true);
+});
+
 test('report --redact anonymizes local identifiers and strips the capture file path before buildReport', async () => {
   const stdout = createWritableCapture();
   const stderr = createWritableCapture();
@@ -355,6 +380,39 @@ test('report --output and --to can combine in one run', async () => {
   const summary = parseTrailingJson(stdout.read());
   assert.match(summary.outputPath, /netdoctor-report\.json$/);
   assert.equal(summary.messageId, '<combo@example.com>');
+});
+
+test('deliver always passes forceFallbackNarrative: true through reportOptions to orchestrateDelivery', async () => {
+  const stdout = createWritableCapture();
+  const stderr = createWritableCapture();
+  let capturedOptions = null;
+
+  const exitCode = await runCli(['deliver', './fixtures/sample-syn.pcap', 'tester@example.com'], {
+    stdout: stdout.stream,
+    stderr: stderr.stream,
+    checkTshark: async () => ({ installed: true, version: 'TShark 4.6.0', message: 'tshark detected' }),
+    parseFile: async (filePath) => ({
+      rows: [],
+      diagnostics: { filePath, packetCount: 4, conversationCount: 1, warnings: [] },
+    }),
+    orchestrateDelivery: async (_parsed, options) => {
+      capturedOptions = options;
+      return {
+        report: { findings: { verdict: { headline: 'Likely upstream/ISP' } } },
+        delivery: {
+          subject: 'e3d netdoctor report: Likely upstream/ISP (2026-07-03)',
+          from: 'e3d netdoctor <support@e3d.ai>',
+          includePdf: options.includePdf,
+          accepted: [options.to],
+          rejected: [],
+          messageId: '<msg-123@example.com>',
+        },
+      };
+    },
+  });
+
+  assert.equal(exitCode, 0);
+  assert.equal(capturedOptions.reportOptions.forceFallbackNarrative, true);
 });
 
 test('deliver orchestrates report email delivery and surfaces sender metadata', async () => {

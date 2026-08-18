@@ -225,6 +225,70 @@ test('runPaidReportRequest does not record wallet spend in one-off mode', async 
   assert.equal(recordSpendCalled, false);
 });
 
+test('runPaidReportRequest passes hostedNarrative + the credit key from NETDOCTOR_PAYMENT_CREDIT_KEY through to buildReport', async () => {
+  const previousKey = process.env.NETDOCTOR_PAYMENT_CREDIT_KEY;
+  process.env.NETDOCTOR_PAYMENT_CREDIT_KEY = 'e3d_netdoctor_env_key';
+  try {
+    let capturedOptions = null;
+
+    await runPaidReportRequest({
+      requestId: 'netdoctor:req-hosted-env',
+      ensurePayment: async () => ({ ok: true, requestId: 'netdoctor:req-hosted-env', product: 'netdoctor', route: '/netdoctor/report', creditsSpent: 500, creditsRemaining: 500 }),
+      captureLive: async () => ({ capture: {}, parsed: { rows: [], diagnostics: { packetCount: 0, conversationCount: 0, warnings: [] } } }),
+      buildReport: async (parsed, options) => {
+        capturedOptions = options;
+        return createFakeReport();
+      },
+      reportOptions: { speedTest: true },
+    });
+
+    assert.equal(capturedOptions.hostedNarrative, true);
+    assert.equal(capturedOptions.hostedNarrativeCreditKey, 'e3d_netdoctor_env_key');
+    assert.equal(capturedOptions.speedTest, true);
+  } finally {
+    if (previousKey !== undefined) process.env.NETDOCTOR_PAYMENT_CREDIT_KEY = previousKey; else delete process.env.NETDOCTOR_PAYMENT_CREDIT_KEY;
+  }
+});
+
+test('runPaidReportRequest passes the wallet-resolved credit key through to buildReport for hosted narrative', async () => {
+  let capturedOptions = null;
+
+  await runPaidReportRequest({
+    requestId: 'netdoctor:req-hosted-wallet',
+    wallet: '0xWallet',
+    resolveCreditKeyViaWallet: async () => ({ creditKey: 'e3d_netdoctor_pay_wallet', source: 'purchased', creditsRemaining: 0 }),
+    ensurePayment: async () => ({ ok: true, requestId: 'netdoctor:req-hosted-wallet', product: 'netdoctor', route: '/netdoctor/report', creditsSpent: 500, creditsRemaining: 0 }),
+    captureLive: async () => ({ capture: {}, parsed: { rows: [], diagnostics: { packetCount: 0, conversationCount: 0, warnings: [] } } }),
+    buildReport: async (parsed, options) => {
+      capturedOptions = options;
+      return createFakeReport();
+    },
+  });
+
+  assert.equal(capturedOptions.hostedNarrative, true);
+  assert.equal(capturedOptions.hostedNarrativeCreditKey, 'e3d_netdoctor_pay_wallet');
+});
+
+test('runPaidReportRequest passes the card-resolved credit key through to buildReport for hosted narrative', async () => {
+  let capturedOptions = null;
+
+  await runPaidReportRequest({
+    requestId: 'netdoctor:req-hosted-card',
+    card: true,
+    cardPackId: 'single',
+    resolveCreditKeyViaCard: async () => ({ creditKey: 'e3d_netdoctor_pay_card', source: 'purchased' }),
+    ensurePayment: async () => ({ ok: true, requestId: 'netdoctor:req-hosted-card', product: 'netdoctor', route: '/netdoctor/report', creditsSpent: 500, creditsRemaining: 0 }),
+    captureLive: async () => ({ capture: {}, parsed: { rows: [], diagnostics: { packetCount: 0, conversationCount: 0, warnings: [] } } }),
+    buildReport: async (parsed, options) => {
+      capturedOptions = options;
+      return createFakeReport();
+    },
+  });
+
+  assert.equal(capturedOptions.hostedNarrative, true);
+  assert.equal(capturedOptions.hostedNarrativeCreditKey, 'e3d_netdoctor_pay_card');
+});
+
 test('runPaidReportRequest documents post-payment retry behavior on downstream failure', async () => {
   await assert.rejects(
     () => runPaidReportRequest({

@@ -91,10 +91,11 @@ function takeFlagValue(args, index, flag) {
   return value;
 }
 
-function buildReportOptions({ noSystemDiagnostics, speedTest }) {
+function buildReportOptions({ noSystemDiagnostics, speedTest }, { forceFallbackNarrative = false } = {}) {
   const options = {};
   if (noSystemDiagnostics) options.systemDiagnostics = false;
   if (speedTest) options.speedTest = true;
+  if (forceFallbackNarrative) options.forceFallbackNarrative = true;
   return options;
 }
 
@@ -390,7 +391,7 @@ async function runReport(args, { stdout, stderr, checkTshark, parseFile, buildRe
 
   const resolvedPath = path.resolve(options.filePath);
   const parsed = applyRedaction(await parseFile(resolvedPath), options.redact);
-  const report = await buildReport(parsed, buildReportOptions(options));
+  const report = await buildReport(parsed, buildReportOptions(options, { forceFallbackNarrative: true }));
   const content = selectReportContent(report, options.format, options.redact);
 
   let resolvedOutput = null;
@@ -467,7 +468,7 @@ async function runDeliver(args, {
   const result = await orchestrateDelivery(parsed, {
     to: recipient,
     includePdf,
-    reportOptions: buildReportOptions({ noSystemDiagnostics, speedTest }),
+    reportOptions: buildReportOptions({ noSystemDiagnostics, speedTest }, { forceFallbackNarrative: true }),
   });
 
   writeLine(stdout, JSON.stringify({

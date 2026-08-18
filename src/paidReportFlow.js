@@ -76,6 +76,8 @@ export async function runPaidReportRequest(options = {}) {
       onPayUrl: options.onPayUrl,
     });
     creditKey = resolved.creditKey;
+  } else {
+    creditKey = creditKey || process.env.NETDOCTOR_PAYMENT_CREDIT_KEY || process.env.E3D_PAYMENT_CREDIT_KEY;
   }
 
   const payment = await ensurePayment({
@@ -109,7 +111,12 @@ export async function runPaidReportRequest(options = {}) {
       options.redact,
     );
 
-    const report = await buildReport(parsed, options.reportOptions);
+    const report = await buildReport(parsed, {
+      ...options.reportOptions,
+      hostedNarrative: true,
+      hostedNarrativeCreditKey: creditKey,
+      hostedNarrativeUrl: options.hostedNarrativeUrl,
+    });
 
     return {
       requestId,

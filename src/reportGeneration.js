@@ -656,9 +656,50 @@ export async function generateNarrativeWithOpenAI(findings, options = {}) {
   return validateNarrative({ ...parsedJson, source: 'openai' }, findings);
 }
 
+const DEFAULT_HOSTED_NARRATIVE_URL = process.env.NETDOCTOR_HOSTED_NARRATIVE_URL || 'https://e3d.ai/api/netdoctor/narrative';
+
+// Used by paid-report when the caller has no ANTHROPIC_API_KEY/OPENAI_API_KEY
+// of their own: e3d generates the narrative server-side (with its own key,
+// paid for out of the report's 500-credit price) and returns it here. Prompt
+// construction and response validation stay local -- the endpoint is a thin
+// completion proxy, gated on the credit key from this same paid-report run.
+export async function generateNarrativeWithHostedProxy(findings, options = {}) {
+  const creditKey = options.hostedNarrativeCreditKey;
+  if (!creditKey) throw new Error('Hosted narrative generation requires a credit key from a completed paid-report payment');
+
+  const url = options.hostedNarrativeUrl || DEFAULT_HOSTED_NARRATIVE_URL;
+  const prompt = buildNarrativePrompt(findings);
+  const fetchImpl = options.fetchImpl || fetch;
+  const response = await fetchImpl(url, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ creditKey, prompt }),
+  });
+
+  if (!response.ok) {
+    const message = await response.text();
+    throw new Error(`Hosted narrative generation failed: ${response.status} ${message}`);
+  }
+
+  const responseJson = await response.json();
+  const text = responseJson?.text;
+  if (!text) throw new Error('Hosted narrative generation returned no text content');
+
+  let parsedJson;
+  try {
+    parsedJson = JSON.parse(stripJsonCodeFence(text));
+  } catch (error) {
+    throw new Error(`Hosted narrative generation returned invalid JSON: ${error.message}`);
+  }
+
+  return validateNarrative({ ...parsedJson, source: 'e3d-hosted' }, findings);
+}
+
 function resolveNarrativeGenerator(options) {
+  if (options.forceFallbackNarrative) return (findingsArg) => createFallbackNarrative(findingsArg);
   if (options.apiKey || process.env.ANTHROPIC_API_KEY) return generateNarrativeWithClaude;
   if (options.openaiApiKey || process.env.OPENAI_API_KEY) return generateNarrativeWithOpenAI;
+  if (options.hostedNarrative) return generateNarrativeWithHostedProxy;
   return (findingsArg) => createFallbackNarrative(findingsArg);
 }
 

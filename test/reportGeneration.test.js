@@ -5,6 +5,7 @@ import {
   buildNarrativePrompt,
   buildStructuredFindings,
   generateNarrativeWithClaude,
+  generateNarrativeWithHostedProxy,
   generateNarrativeWithOpenAI,
   generateReport,
   renderReportMarkdown,
@@ -377,6 +378,146 @@ test('generateNarrativeWithOpenAI throws a clear error on a non-JSON response', 
     () => generateNarrativeWithOpenAI(findings, { openaiApiKey: 'test-key', fetchImpl }),
     /OpenAI narrative generation returned invalid JSON/,
   );
+});
+
+test('generateNarrativeWithHostedProxy throws without a credit key, without making a network call', async () => {
+  const findings = buildStructuredFindings(createParsedCaptureFixture());
+  const fetchImpl = async () => { throw new Error('should not be called'); };
+
+  await assert.rejects(
+    () => generateNarrativeWithHostedProxy(findings, { fetchImpl }),
+    /requires a credit key/,
+  );
+});
+
+test('generateNarrativeWithHostedProxy posts the prompt and credit key, and parses the result', async () => {
+  const findings = buildStructuredFindings(createParsedCaptureFixture());
+  let calledUrl = null;
+  let capturedBody = null;
+
+  const fetchImpl = async (url, options) => {
+    calledUrl = url;
+    capturedBody = JSON.parse(options.body);
+    return {
+      ok: true,
+      text: async () => '',
+      json: async () => ({ text: '{"executiveSummary":["a","b","c"],"sections":{"overview":"o"}}' }),
+    };
+  };
+
+  const narrative = await generateNarrativeWithHostedProxy(findings, {
+    hostedNarrativeCreditKey: 'credit-key-123',
+    fetchImpl,
+  });
+
+  assert.equal(calledUrl, 'https://e3d.ai/api/netdoctor/narrative');
+  assert.equal(capturedBody.creditKey, 'credit-key-123');
+  assert.equal(typeof capturedBody.prompt, 'string');
+  assert.equal(narrative.source, 'e3d-hosted');
+  assert.deepEqual(narrative.executiveSummary, ['a', 'b', 'c']);
+});
+
+test('generateNarrativeWithHostedProxy honors a custom hostedNarrativeUrl', async () => {
+  const findings = buildStructuredFindings(createParsedCaptureFixture());
+  let calledUrl = null;
+  const fetchImpl = async (url) => {
+    calledUrl = url;
+    return { ok: true, text: async () => '', json: async () => ({ text: '{"executiveSummary":["a"],"sections":{}}' }) };
+  };
+
+  await generateNarrativeWithHostedProxy(findings, {
+    hostedNarrativeCreditKey: 'credit-key-123',
+    hostedNarrativeUrl: 'https://staging.example.com/narrative',
+    fetchImpl,
+  });
+
+  assert.equal(calledUrl, 'https://staging.example.com/narrative');
+});
+
+test('generateNarrativeWithHostedProxy throws a clear error on a non-ok response', async () => {
+  const findings = buildStructuredFindings(createParsedCaptureFixture());
+  const fetchImpl = async () => ({ ok: false, status: 402, text: async () => 'Invalid netdoctor credit key' });
+
+  await assert.rejects(
+    () => generateNarrativeWithHostedProxy(findings, { hostedNarrativeCreditKey: 'bad-key', fetchImpl }),
+    /Hosted narrative generation failed: 402/,
+  );
+});
+
+test('generateReport forces the deterministic fallback when forceFallbackNarrative is set, even with API keys present', async () => {
+  const previousAnthropicKey = process.env.ANTHROPIC_API_KEY;
+  process.env.ANTHROPIC_API_KEY = 'anthropic-test-key';
+  try {
+    const fetchImpl = async () => { throw new Error('should not be called'); };
+
+    const report = await generateReport(createParsedCaptureFixture(), {
+      generatedAt: '2026-07-03T21:00:00.000Z',
+      systemDiagnostics: false,
+      forceFallbackNarrative: true,
+      fetchImpl,
+    });
+
+    assert.equal(report.narrative.source, 'fallback');
+  } finally {
+    if (previousAnthropicKey !== undefined) process.env.ANTHROPIC_API_KEY = previousAnthropicKey; else delete process.env.ANTHROPIC_API_KEY;
+  }
+});
+
+test('generateReport uses the hosted narrative proxy when hostedNarrative is set and no local API key is present', async () => {
+  const previousAnthropicKey = process.env.ANTHROPIC_API_KEY;
+  const previousOpenaiKey = process.env.OPENAI_API_KEY;
+  delete process.env.ANTHROPIC_API_KEY;
+  delete process.env.OPENAI_API_KEY;
+  try {
+    const calledUrls = [];
+    const fetchImpl = async (url) => {
+      calledUrls.push(url);
+      return { ok: true, text: async () => '', json: async () => ({ text: '{"executiveSummary":["ok"],"sections":{}}' }) };
+    };
+
+    const report = await generateReport(createParsedCaptureFixture(), {
+      generatedAt: '2026-07-03T21:00:00.000Z',
+      systemDiagnostics: false,
+      hostedNarrative: true,
+      hostedNarrativeCreditKey: 'credit-key-123',
+      fetchImpl,
+    });
+
+    assert.deepEqual(calledUrls, ['https://e3d.ai/api/netdoctor/narrative']);
+    assert.equal(report.narrative.source, 'e3d-hosted');
+  } finally {
+    if (previousAnthropicKey !== undefined) process.env.ANTHROPIC_API_KEY = previousAnthropicKey;
+    if (previousOpenaiKey !== undefined) process.env.OPENAI_API_KEY = previousOpenaiKey;
+  }
+});
+
+test('generateReport prefers a local API key over the hosted narrative proxy when both are available', async () => {
+  const previousOpenaiKey = process.env.OPENAI_API_KEY;
+  process.env.OPENAI_API_KEY = 'openai-test-key';
+  try {
+    const calledUrls = [];
+    const fetchImpl = async (url) => {
+      calledUrls.push(url);
+      return {
+        ok: true,
+        text: async () => '',
+        json: async () => ({ choices: [{ finish_reason: 'stop', message: { content: '{"executiveSummary":["ok"],"sections":{}}' } }] }),
+      };
+    };
+
+    const report = await generateReport(createParsedCaptureFixture(), {
+      generatedAt: '2026-07-03T21:00:00.000Z',
+      systemDiagnostics: false,
+      hostedNarrative: true,
+      hostedNarrativeCreditKey: 'credit-key-123',
+      fetchImpl,
+    });
+
+    assert.deepEqual(calledUrls, ['https://api.openai.com/v1/chat/completions']);
+    assert.equal(report.narrative.source, 'openai');
+  } finally {
+    if (previousOpenaiKey !== undefined) process.env.OPENAI_API_KEY = previousOpenaiKey; else delete process.env.OPENAI_API_KEY;
+  }
 });
 
 test('generateReport prefers Anthropic over OpenAI when both keys are present', async () => {
