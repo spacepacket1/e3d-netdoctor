@@ -114,7 +114,29 @@ otherwise, paid for out of the same 500 credits. Like `report`, it defaults to
 printing
 JSON to stdout — here that's the payment receipt plus `findings`/`narrative` —
 with `--format`/`--output`/`--to` working exactly the same way; email is opt-in
-via `--to`, not automatic. There are three ways to pay, aimed at three different
+via `--to`, not automatic.
+
+### How credits are remembered and used
+
+A credit key's balance lives entirely on e3d's server — it's a running total
+(credits purchased minus credits spent) for that key, scoped to netdoctor.
+Buying more credits doesn't reset anything; it just adds to that same balance,
+and it never expires on its own. See [`docs/payment-gate.md`](docs/payment-gate.md#how-balances-are-tracked)
+for exactly how that balance is computed.
+
+What the CLI itself remembers **locally**, on disk, depends entirely on which
+of the three payment methods below you use:
+
+| Method | Remembered locally? |
+|---|---|
+| `NETDOCTOR_PAYMENT_CREDIT_KEY` (env var) | No — it's already yours to manage; the CLI only ever reads it. |
+| `--card [packId]` | No. The key is printed once after checkout and never cached — copy it into `NETDOCTOR_PAYMENT_CREDIT_KEY` yourself if you bought a multi-report pack and want to reuse it. |
+| `--wallet <address>`, one-off (no `--credits`) | No, by design — every run pays for exactly that one report. |
+| `--wallet <address> --credits n`, batch mode | **Yes.** The key and its last-known remaining balance are saved to `~/.config/e3d-netdoctor/config.json`, keyed by wallet address, and reused automatically on future `--wallet` runs until the balance drops below one report's cost (500 credits) — at which point netdoctor buys another batch. |
+
+In short: only wallet *batch* mode gets automatic local memory. Every other
+path either requires you to hold onto the credit key yourself, or intentionally
+starts fresh every time. There are three ways to pay, aimed at three different
 users:
 
 - **A pre-provisioned credit key** (`NETDOCTOR_PAYMENT_CREDIT_KEY`) — for

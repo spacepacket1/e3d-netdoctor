@@ -15,6 +15,33 @@ The CLI enforces this expected spend amount locally after the e3d payment API re
 markdown|html`, `--output <file>`, and `--to <email>` work exactly like they do
 on `report`; email delivery is opt-in via `--to`, not a side effect of paying.
 
+## How balances are tracked
+
+A credit key's balance is not a stored counter that gets decremented in
+place. On the e3d payments backend (`productPaymentsService.js`), every
+purchase is an append-only row in a `product_api_credit_purchases` table and
+every spend an append-only row in `product_api_credit_spends` table, each
+scoped by `product` (`netdoctor`) and `key_hash` — the raw credit key run
+through SHA-256; the raw key itself is never stored server-side. Balance is
+computed on read, not maintained as mutable state:
+
+```
+balance = sum(issued_credits WHERE product, key_hash)
+        - sum(credits_spent  WHERE product, key_hash)
+```
+
+Practically, this means: buying more credits always adds to the same running
+total rather than resetting it, a balance never silently expires on its own,
+and every purchase/spend is independently auditable after the fact. The
+`spendCredits` call that `paid-report` makes (see below) is keyed by a stable
+request ID for the same reason — retrying with that ID reuses the existing
+spend row instead of writing a duplicate one.
+
+None of this ledger lives on the machine running the CLI. What (if anything)
+gets cached locally — a saved wallet-batch credit key, or nothing at all for
+the card/env-var paths — is covered in the README's ["How credits are
+remembered and used"](../README.md#how-credits-are-remembered-and-used).
+
 ## Wallet payments (`--wallet`)
 
 `paid-report --wallet <address>` pays without a pre-provisioned credit key, by
