@@ -320,3 +320,7 @@ Every external boundary — `tshark`, `ping`/`traceroute`/`netstat`, SMTP, PDF
 rendering, the payment API — is exercised through dependency injection so the suite
 runs offline and fast, plus a real local-socket SMTP conversation and real fixture
 `.pcap` parses so the important paths are proven end-to-end, not just mocked.
+
+## License
+
+[MIT](LICENSE) © 2026 FutCo LLC. Part of the [FutCo](https://futco.ai/projects) open-source ecosystem.
